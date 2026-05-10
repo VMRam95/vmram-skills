@@ -21,11 +21,11 @@ This skill is based on the analytics system built for `stick-crisis-landing`. Us
 
 | File | Path |
 |------|------|
-| Analytics library | `~/Documentos/repositories/stick-crisis-landing/src/lib/analytics.ts` |
-| useAnalytics hook | `~/Documentos/repositories/stick-crisis-landing/src/hooks/useAnalytics.ts` |
-| AnalyticsTracker | `~/Documentos/repositories/stick-crisis-landing/src/components/analytics/AnalyticsTracker.tsx` |
-| API route | `~/Documentos/repositories/stick-crisis-landing/src/app/api/analytics/event/route.ts` |
-| Window types | `~/Documentos/repositories/stick-crisis-landing/src/types/window.d.ts` |
+| Analytics library | `<REFERENCE_PROJECT>/src/lib/analytics.ts` |
+| useAnalytics hook | `<REFERENCE_PROJECT>/src/hooks/useAnalytics.ts` |
+| AnalyticsTracker | `<REFERENCE_PROJECT>/src/components/analytics/AnalyticsTracker.tsx` |
+| API route | `<REFERENCE_PROJECT>/src/app/api/analytics/event/route.ts` |
+| Window types | `<REFERENCE_PROJECT>/src/types/window.d.ts` |
 
 ## Prerequisites
 
@@ -129,7 +129,7 @@ Replace `{schema}` with the project's Supabase schema.
 
 ### Phase 4: Create Analytics Library
 
-Read the reference file `~/Documentos/repositories/stick-crisis-landing/src/lib/analytics.ts` and adapt it to the target project:
+Read the reference file `<REFERENCE_PROJECT>/src/lib/analytics.ts` and adapt it to the target project:
 
 Create `src/lib/analytics.ts` with:
 
@@ -168,7 +168,7 @@ interface Window {
 
 ### Phase 6: Create useAnalytics Hook
 
-Read the reference file `~/Documentos/repositories/stick-crisis-landing/src/hooks/useAnalytics.ts` and adapt:
+Read the reference file `<REFERENCE_PROJECT>/src/hooks/useAnalytics.ts` and adapt:
 
 Create `src/hooks/useAnalytics.ts`:
 
@@ -195,7 +195,7 @@ export function AnalyticsTracker() {
 
 ### Phase 8: Create API Route
 
-Read the reference file `~/Documentos/repositories/stick-crisis-landing/src/app/api/analytics/event/route.ts` and adapt:
+Read the reference file `<REFERENCE_PROJECT>/src/app/api/analytics/event/route.ts` and adapt:
 
 Create `src/app/api/analytics/event/route.ts`:
 
@@ -292,4 +292,4 @@ Standard event names (adapt per project):
 - `navigator.sendBeacon()` ensures events survive page navigation/unload
 - Rate limiting prevents abuse but allows normal browsing (30 events/min is generous)
 - Ad blockers may block GA4 but not first-party Supabase analytics (same-origin requests)
-- For admin dashboard visualization, see the stick-crisis-admin implementation at `~/Documentos/repositories/stick-crisis-admin/src/app/analytics/`
+- For admin dashboard visualization, see the stick-crisis-admin implementation at `<REFERENCE_ADMIN_PROJECT>/src/app/analytics/`

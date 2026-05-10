@@ -18,7 +18,7 @@ Creates a new email template in the email-service. Handles everything: project c
 | Supabase Project ID | `vxirigqzqixsihyunazf` |
 | DB Schema | `email_admin` |
 | Production URL | `https://email-service-opal-seven.vercel.app` |
-| Email-service repo | `~/Documentos/repositories/email-service` |
+| Email-service repo | `<EMAIL_SERVICE_REPO>` |
 | Template engine | Handlebars |
 | Template ID format | `category/slug` (e.g., `my-app/welcome`) |
 
@@ -220,9 +220,9 @@ RETURNING id, name, slug, category;
 
 ### Step 7: Create migration file
 
-Determine the next migration number by listing existing files in `~/Documentos/repositories/email-service/supabase/migrations/`.
+Determine the next migration number by listing existing files in `<EMAIL_SERVICE_REPO>/supabase/migrations/`.
 
-Create file: `~/Documentos/repositories/email-service/supabase/migrations/{{NNN}}_{{category}}_{{slug}}_template.sql`
+Create file: `<EMAIL_SERVICE_REPO>/supabase/migrations/{{NNN}}_{{category}}_{{slug}}_template.sql`
 
 The migration file should contain:
 1. Comment header explaining the template

@@ -524,7 +524,7 @@ networks:
 
 Add the new project to the `KNOWN_PROJECTS` array in **shopify-commission-engine**:
 
-File: `~/Documentos/repositories/shopify-commission-engine/backend/src/routes/users.js`
+File: `<YOUR_BACKEND_REPO>/backend/src/routes/users.js`
 
 ```javascript
 const KNOWN_PROJECTS = [

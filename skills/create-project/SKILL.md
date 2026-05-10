@@ -66,7 +66,7 @@ Use `AskUserQuestion` to gather the following information:
 
 Templates are located in the shared-config repository:
 ```
-~/Documentos/repositories/shared-config/templates/
+<TEMPLATES_DIR>/
 ├── nextjs-vercel/     # Next.js + Vercel template ✅
 ├── api-railway/       # API + Railway template ✅
 ├── api-docker/        # API + Docker template ✅
@@ -96,12 +96,12 @@ else:
 
 ### 3. Create Project Directory
 
-**Default location:** `~/Documentos/repositories/{project-name}/`
+**Default location:** `<PROJECTS_DIR>/{project-name}/`
 
 ```bash
-mkdir -p ~/Documentos/repositories/{project-name}
-cp -r {template-path}/* ~/Documentos/repositories/{project-name}/
-cp -r {template-path}/.* ~/Documentos/repositories/{project-name}/ 2>/dev/null || true
+mkdir -p <PROJECTS_DIR>/{project-name}
+cp -r {template-path}/* <PROJECTS_DIR>/{project-name}/
+cp -r {template-path}/.* <PROJECTS_DIR>/{project-name}/ 2>/dev/null || true
 ```
 
 ### 4. Replace Placeholders
@@ -138,7 +138,7 @@ find . -type f \( -name "*.json" -o -name "*.md" -o -name "*.tsx" -o -name "*.ts
 **Initialize git with correct identity:**
 
 ```bash
-cd ~/Documentos/repositories/{project-name}
+cd <PROJECTS_DIR>/{project-name}
 git init
 
 # Set identity based on selection
@@ -155,7 +155,7 @@ else:
 ### 6. Install Dependencies
 
 ```bash
-cd ~/Documentos/repositories/{project-name}
+cd <PROJECTS_DIR>/{project-name}
 pnpm install
 ```
 
@@ -188,20 +188,20 @@ pnpm build
 ## Output
 
 Report to user:
-1. Project created at: `~/Documentos/repositories/{project-name}/`
+1. Project created at: `<PROJECTS_DIR>/{project-name}/`
 2. Template used: `{template-name}`
 3. Git configured with: `{email}`
 4. Dependencies installed: ✅/❌
 5. Verification: pass/fail
 6. Next steps:
-   - `cd ~/Documentos/repositories/{project-name}`
+   - `cd <PROJECTS_DIR>/{project-name}`
    - `pnpm dev`
    - Create GitHub repository: `gh repo create {project-name} --private --source=. --push`
 
 ## Notes
 
 - Always use the `github-personal` SSH alias for personal projects
-- Default location is `~/Documentos/repositories/`
+- Default location is `<PROJECTS_DIR>/`
 - Templates extend `@shared/config` for consistent configuration
 - CLAUDE.md is automatically customized with project name
 - Initial commit follows conventional commits format and must not include AI attribution trailers

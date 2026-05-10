@@ -22,7 +22,7 @@ Automates the full integration of any project with the email-service API. Suppor
 | DB Schema | `email_admin` |
 | API Key Format | `es-{32 hex chars}` |
 | Encryption | AES-256-CBC |
-| Email-service repo | `~/Documentos/repositories/email-service` |
+| Email-service repo | `<EMAIL_SERVICE_REPO>` |
 
 ## API Reference
 
@@ -473,7 +473,7 @@ RETURNING id, api_key, name;
 
 **7a. Read encryption key from email-service .env:**
 
-Use the **Read** tool to read `~/Documentos/repositories/email-service/.env` and extract the `GMAIL_ENCRYPTION_KEY` value.
+Use the **Read** tool to read `<EMAIL_SERVICE_REPO>/.env` and extract the `GMAIL_ENCRYPTION_KEY` value.
 
 **7b. Encrypt password via Bash + Node.js:**
 
