@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --primary: #1E3A5F;
+            --accent: #2563EB;
+            --gold: #B8860B;
+            --gold-light: #DAA520;
+            --light: #F8FAFC;
+            --lighter: #FAFBFD;
+            --border: #E2E8F0;
+            --border-light: #F1F5F9;
+            --text: #1E293B;
+            --text-muted: #64748B;
+            --text-light: #94A3B8;
+        }
+
+        @page {
+            size: A4;
+            margin: 18mm 15mm 22mm 15mm;
+        }
+        @page:first { margin: 0; }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 10.5pt;
+            line-height: 1.65;
+            color: var(--text);
+            background: white;
+            max-width: 210mm;
+            margin: 0 auto;
+        }
+
+        /* ===================== COVER ===================== */
+        .cover {
+            height: 100vh;
+            min-height: 297mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            position: relative;
+            background: linear-gradient(165deg, var(--primary) 0%, #0F2440 60%, #0A1628 100%);
+            color: white;
+            padding: 80px 60px;
+            page-break-after: always;
+            overflow: hidden;
+        }
+
+        .cover::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -30%;
+            width: 80%;
+            height: 200%;
+            background: radial-gradient(ellipse, rgba(37,99,235,0.08) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .cover::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, var(--gold), var(--gold-light), var(--gold));
+        }
+
+        .cover-badge {
+            font-size: 9pt;
+            font-weight: 600;
+            letter-spacing: 6px;
+            text-transform: uppercase;
+            color: var(--gold-light);
+            margin-bottom: 40px;
+            z-index: 1;
+        }
+
+        .cover h1 {
+            display: block !important;
+            background: none !important;
+            color: white !important;
+            border: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            font-family: 'Playfair Display', serif !important;
+            font-size: 52pt !important;
+            font-weight: 700;
+            line-height: 1.15;
+            z-index: 1;
+            max-width: 600px;
+        }
+
+        .cover-line {
+            width: 70px;
+            height: 3px;
+            background: var(--gold);
+            margin: 45px auto;
+            z-index: 1;
+        }
+
+        .cover-meta {
+            font-size: 12pt;
+            color: rgba(255,255,255,0.45);
+            letter-spacing: 1px;
+            z-index: 1;
+        }
+
+
+        /* ===================== TOC ===================== */
+        .toc-page {
+            padding: 20mm 18mm 30mm;
+            page-break-after: always;
+        }
+
+        .toc-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 22pt;
+            color: var(--primary);
+            margin-bottom: 8px;
+        }
+
+        .toc-line {
+            width: 40px;
+            height: 3px;
+            background: var(--gold);
+            margin-bottom: 30px;
+        }
+
+        .toc-item {
+            display: flex;
+            align-items: baseline;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-light);
+            font-size: 10.5pt;
+            cursor: pointer;
+        }
+
+        .toc-item:hover { background: var(--lighter); margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+
+        .toc-number {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9pt;
+            color: var(--accent);
+            font-weight: 500;
+            min-width: 34px;
+        }
+
+        .toc-text { color: var(--text); font-weight: 500; }
+
+        .toc-dots {
+            flex: 1;
+            margin: 0 8px;
+            min-width: 20px;
+            height: 0.8em;
+            background-image: radial-gradient(circle, var(--text-light) 0.5px, transparent 0.5px);
+            background-size: 5px 1em;
+            background-position: left center;
+            background-repeat: repeat-x;
+        }
+
+        .toc-sub-item {
+            display: flex;
+            align-items: baseline;
+            padding: 5px 0 5px 34px;
+            font-size: 9.5pt;
+            cursor: pointer;
+        }
+
+        .toc-sub-item:hover { background: var(--lighter); margin: 0 -8px; padding-left: 42px; padding-right: 8px; }
+
+        .toc-sub-number {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 7.5pt;
+            color: var(--text-light);
+            min-width: 32px;
+        }
+
+        .toc-sub-text { color: var(--text-muted); }
+
+        /* ===================== CONTENT ===================== */
+        .content { padding: 0 18mm 40px; }
+
+        h1 { display: none; }
+
+        h2 {
+            font-family: 'Playfair Display', serif;
+            color: var(--primary);
+            font-size: 17pt;
+            font-weight: 700;
+            margin: 45px 0 20px;
+            padding-top: 15px;
+            page-break-after: avoid;
+        }
+
+        h2::after {
+            content: '';
+            display: block;
+            width: 35px;
+            height: 3px;
+            background: var(--gold);
+            margin-top: 10px;
+        }
+
+        h3 {
+            color: var(--accent);
+            font-size: 12.5pt;
+            font-weight: 600;
+            margin: 30px 0 14px;
+            page-break-after: avoid;
+        }
+
+        h4 {
+            color: var(--text-muted);
+            font-size: 9.5pt;
+            font-weight: 600;
+            margin: 22px 0 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        p { margin-bottom: 12px; }
+        strong { font-weight: 600; }
+        em { font-style: italic; color: var(--text-muted); }
+
+        /* ===================== DATA TABLES ===================== */
+        .content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 18px 0;
+            font-size: 9.5pt;
+            page-break-inside: avoid;
+        }
+
+        .content th {
+            background: var(--primary);
+            color: white;
+            font-weight: 600;
+            text-align: left;
+            padding: 11px 14px;
+            font-size: 8.5pt;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .content td { padding: 11px 14px; border-bottom: 1px solid var(--border); }
+        .content tr:nth-child(even) { background: var(--lighter); }
+        .content tr:last-child td { font-weight: 500; }
+
+        /* ===================== MISC ===================== */
+        .alert { padding: 14px 18px; border-radius: 6px; margin: 18px 0; font-size: 9.5pt; line-height: 1.6; }
+        .alert-warning { background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; }
+        .alert-info { background: #EFF6FF; border: 1px solid #BFDBFE; color: #1E40AF; }
+        .alert-danger { background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; }
+
+        pre {
+            background: #0F172A; color: #E2E8F0; padding: 16px 20px; border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace; font-size: 8.5pt; line-height: 1.55;
+            margin: 14px 0; page-break-inside: avoid; overflow-x: auto; border-left: 3px solid var(--accent);
+        }
+
+        code { font-family: 'JetBrains Mono', monospace; background: var(--light); padding: 2px 7px; border-radius: 4px; font-size: 9pt; color: var(--accent); }
+        pre code { background: none; padding: 0; color: inherit; }
+
+        ul, ol { margin: 12px 0 12px 22px; }
+        li { margin-bottom: 7px; }
+        hr { border: none; border-top: 1px solid var(--border); margin: 35px 0; }
+        a { color: var(--accent); text-decoration: none; font-weight: 500; }
+
+        /* ===================== TOC LINKS ===================== */
+        a.toc-item, a.toc-sub-item {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        /* ===================== PRINT BAR ===================== */
+        .print-bar {
+            position: fixed; top: 0; left: 0; right: 0;
+            background: var(--primary); color: white;
+            display: flex; justify-content: center; align-items: center; gap: 15px;
+            padding: 12px 24px; z-index: 1000; box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .print-bar button {
+            background: var(--gold); color: var(--primary); border: none;
+            padding: 10px 28px; font-size: 11pt; font-weight: 600; border-radius: 6px;
+            cursor: pointer; font-family: 'Inter', sans-serif;
+        }
+
+        .print-bar button:hover { background: var(--gold-light); }
+        .print-bar span { font-size: 9pt; opacity: 0.7; }
+
+        /* ===================== PRINT ===================== */
+        @media print {
+            .print-bar { display: none !important; }
+            body { padding: 0; }
+            .cover {
+                height: 100vh;
+                margin: 0;
+                padding: 0 50px;
+                background: linear-gradient(165deg, var(--primary) 0%, #0F2440 60%, #0A1628 100%);
+            }
+            .toc-page { padding: 15mm; }
+            .content { padding: 0 0 10px; }
+            h2 { margin-top: 30px; }
+
+        }
+    </style>
+</head>
+<body>
+
+    <div class="print-bar">
+        <button onclick="window.print()">Guardar como PDF</button>
+        <span>Cmd+P para opciones de impresion</span>
+    </div>
+
+    <!-- COVER -->
+    <div class="cover">
+        <div class="cover-badge">Presupuesto de Desarrollo</div>
+        <h1 id="cover-title">{{TITLE}}</h1>
+        <div class="cover-line"></div>
+        <div class="cover-meta" id="cover-meta"></div>
+    </div>
+
+    <!-- TOC -->
+    <div class="toc-page">
+        <div class="toc-title">Indice</div>
+        <div class="toc-line"></div>
+        <div id="toc-list"></div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="content" id="main-content">
+        {{CONTENT}}
+    </div>
+
+    <script>
+        (function() {
+            var c = document.getElementById('main-content');
+            var t = c.innerText;
+
+            // Cover: client name as main title, date as meta
+            var d = t.match(/Fecha:\s*([^\n]+)/);
+            var cl = t.match(/Cliente:\s*([^\n]+)/);
+            var coverTitle = document.getElementById('cover-title');
+            if (cl) coverTitle.textContent = cl[1].replace(/Proyecto:.*/, '').trim();
+            var m = document.getElementById('cover-meta');
+            m.innerHTML = d ? d[1].replace(/Cliente:.*/, '').trim() : '';
+
+            // Hide metadata block (Fecha, Cliente, Proyecto) from visible content
+            // These are <strong> tags + text nodes as direct children of #main-content
+            var toRemove = [];
+            var nodes = Array.from(c.childNodes);
+            for (var i = 0; i < nodes.length; i++) {
+                var node = nodes[i];
+                var txt = (node.textContent || '').trim();
+                // Match strong tags with metadata labels
+                if (node.tagName === 'STRONG' && txt.match(/^(Fecha|Cliente|Proyecto):/)) {
+                    toRemove.push(node);
+                    // Also grab the next text node (the value)
+                    if (nodes[i+1] && nodes[i+1].nodeType === 3) {
+                        toRemove.push(nodes[i+1]);
+                        i++;
+                    }
+                }
+            }
+            toRemove.forEach(function(n) { n.parentNode.removeChild(n); });
+
+            // Hide first h2 (subtitle already shown on cover) and its trailing hr
+            var firstH2 = c.querySelector('h2');
+            if (firstH2) {
+                firstH2.style.display = 'none';
+                var nextEl = firstH2.nextElementSibling;
+                if (nextEl && nextEl.tagName === 'HR') nextEl.style.display = 'none';
+            }
+
+            // TOC: h2 = section, h3 = sub (skip hidden first h2)
+            var hs = c.querySelectorAll('h2, h3');
+            var toc = document.getElementById('toc-list');
+            var s = 0, sub = 0;
+
+            hs.forEach(function(h) {
+                if (h.style.display === 'none') return;
+                if (h.tagName === 'H2') {
+                    s++; sub = 0;
+                    h.id = 's' + s;
+                    var el = document.createElement('a');
+                    el.href = '#s' + s;
+                    el.className = 'toc-item';
+                    el.innerHTML = '<span class="toc-number">' + String(s).padStart(2,'0') + '</span><span class="toc-text">' + h.textContent + '</span><span class="toc-dots"></span>';
+                    toc.appendChild(el);
+                } else {
+                    sub++;
+                    var id = 's' + s + '_' + sub;
+                    h.id = id;
+                    var el = document.createElement('a');
+                    el.href = '#' + id;
+                    el.className = 'toc-sub-item';
+                    el.innerHTML = '<span class="toc-sub-number">' + s + '.' + sub + '</span><span class="toc-sub-text">' + h.textContent + '</span>';
+                    toc.appendChild(el);
+                }
+            });
+
+            // Hide h1 in content
+            var h1 = c.querySelector('h1');
+            if (h1) h1.style.display = 'none';
+
+            // Hide last hr in content (trailing separator causes blank page in print)
+            var hrs = c.querySelectorAll('hr');
+            if (hrs.length > 0) hrs[hrs.length - 1].style.display = 'none';
+
+            // Hide italic author line if present
+            c.querySelectorAll('em').forEach(function(e) {
+                if (e.textContent.indexOf('Presupuesto elaborado') > -1) e.parentElement.style.display = 'none';
+            });
+        })();
+    </script>
+</body>
+</html>

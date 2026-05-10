@@ -1,0 +1,5 @@
+version: 1
+interface:
+  display_name: Model Conversation Continuity
+  short_description: Cross-model handoff create/refresh/resume skill
+  default_prompt: Create or refresh a decision-complete handoff file so another model can resume work without losing context.

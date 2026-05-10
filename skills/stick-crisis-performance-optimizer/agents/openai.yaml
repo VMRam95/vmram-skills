@@ -1,0 +1,5 @@
+version: 1
+interface:
+  display_name: Stick Crisis Performance Optimizer
+  short_description: Iterative Unity performance workflow for this repo
+  default_prompt: Audit and optimize Stick Crisis performance using the local skill workflow, inventories, and hotspot references.

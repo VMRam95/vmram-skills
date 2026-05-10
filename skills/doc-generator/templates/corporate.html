@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{TITLE}}</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --primary: #2563EB;
+            --dark: #1E3A5F;
+            --light: #F8FAFC;
+            --code-bg: #1E293B;
+            --border: #E2E8F0;
+            --text: #1E293B;
+            --text-muted: #64748B;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            font-size: 11pt;
+            line-height: 1.7;
+            color: var(--text);
+            background: white;
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 20mm;
+        }
+
+        h1 {
+            color: var(--dark);
+            font-size: 28pt;
+            font-weight: 700;
+            margin-bottom: 10px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid var(--primary);
+        }
+
+        h2 {
+            color: var(--primary);
+            font-size: 16pt;
+            margin: 40px 0 20px 0;
+            page-break-after: avoid;
+        }
+
+        h3 {
+            color: var(--dark);
+            font-size: 13pt;
+            margin: 30px 0 15px 0;
+            page-break-after: avoid;
+        }
+
+        h4 {
+            color: var(--text-muted);
+            font-size: 10pt;
+            margin: 20px 0 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        p { margin-bottom: 14px; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 9.5pt;
+            border: 1px solid var(--border);
+        }
+
+        th {
+            background: var(--primary);
+            color: white;
+            font-weight: 600;
+            text-align: left;
+            padding: 12px 15px;
+        }
+
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        tr:nth-child(even) { background: var(--light); }
+
+        pre {
+            background: var(--code-bg);
+            color: #E2E8F0;
+            padding: 18px 20px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9pt;
+            line-height: 1.5;
+            margin: 15px 0;
+            page-break-inside: avoid;
+            overflow-x: auto;
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--light);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 9pt;
+            color: var(--primary);
+        }
+
+        pre code { background: none; padding: 0; color: inherit; }
+
+        .alert {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 10pt;
+        }
+
+        .alert-warning { background: #FEF9C3; border: 1px solid #FDE047; color: #854D0E; }
+        .alert-info { background: #E0F2FE; border: 1px solid #7DD3FC; color: #075985; }
+        .alert-danger { background: #FEE2E2; border: 1px solid #FCA5A5; color: #991B1B; }
+
+        ul, ol { margin: 12px 0 12px 25px; }
+        li { margin-bottom: 8px; }
+        hr { border: none; border-top: 2px solid var(--border); margin: 40px 0; }
+
+        a { color: var(--primary); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        .print-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 11pt;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        @media print {
+            body { padding: 15mm; }
+            .print-btn { display: none; }
+        }
+    </style>
+</head>
+<body>
+    <button class="print-btn" onclick="window.print()">Guardar como PDF</button>
+    {{CONTENT}}
+</body>
+</html>
