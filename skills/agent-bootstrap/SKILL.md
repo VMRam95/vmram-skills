@@ -118,8 +118,21 @@ Inventaría el repo en **solo lectura** y prepara propuestas, no conclusiones:
 
 ### Fase 2 · Entrevista
 
-Ocho decisiones, con `AskUserQuestion`, cada una con el default que sugiere el recon. **No las
-asumas: cambian el diseño del agente.**
+**Pregunta 0 — el perfil del proyecto.** Derívalo del recon (líneas de código reales, módulos con
+contenido, número de repos, tamaño del equipo) y proponlo:
+
+| Perfil | Cuándo | Qué se monta |
+|---|---|---|
+| **S** | un repo, un módulo con código real, una persona | Arquitecto + **un** especialista. Sin reviewer. Fitness sí (baratas y valiosas desde el día uno). Scorecard y AUDIT-REPORT opcionales. Hook opcional |
+| **M** | varios módulos con código, un equipo pequeño | Todo lo anterior + un especialista por área real + scorecard |
+| **L** | multi-repo o equipo | Todo + reviewer + fan-out de auditoría + AUDIT-REPORT |
+
+Esto es la regla de oro nº 9 con mecanismo. Sin ella, "proporcionalidad" es una convención más, y
+las convenciones sin mecanismo decaen. **Montar la maquinaria completa sobre un repo de trescientas
+líneas no protege nada: solo añade ceremonia.**
+
+Después, las ocho decisiones, con `AskUserQuestion`, cada una con el default que sugiere el recon.
+**No las asumas: cambian el diseño del agente.**
 
 1. **Mandato del arquitecto** — default: steward de diseño + GATE estructural, sin revisión de
    cumplimiento por PR.
@@ -252,7 +265,13 @@ donde además supervisa el humano.
 Refuerza a nivel de harness el límite "el arquitecto sólo escribe en su KB". Los hooks
 `PreToolUse` se disparan dentro de subagentes y el payload incluye el tipo de agente.
 
+Se instala en el **workspace** (`../.claude/`, junto al repo de código), no en el ámbito de usuario:
+los agentes de un proyecto no deben aparecer en todas tus sesiones. `install.sh` lo cablea con la
+ruta absoluta de cada máquina, haciendo copia de seguridad y merge no destructivo del `settings.json`.
+
 **Diséñalo fail-safe**: bloquea **sólo** si el agente coincide **y** la ruta está fuera de la KB.
+Matchea por **sufijo de ruta**, nunca por ruta absoluta: así el repo se puede mover, renombrar o
+clonar en otra máquina sin que el guard deje de proteger.
 Cualquier otro caso —otro agente, JSON inválido, falta `jq`— **permite**. Así es imposible
 sobre-bloquear. Pruébalo con payloads simulados antes de confiar en él.
 
@@ -299,8 +318,8 @@ sobre-bloquear. Pruébalo con payloads simulados antes de confiar en él.
 | `VERSION` | Semver de la metodología. Lo consulta `upgrade` |
 | `templates/charters/` | Esqueletos de charter: arquitecto, especialista, reviewer |
 | `templates/kb/` | Esqueleto de la base de conocimiento |
-| `templates/repo/` | `install.sh`, README, `orchestration.md`, manifest |
-| `templates/scripts/` | write-guard, refresh, esqueletos de check-arch |
+| `templates/repo/` | `install.sh` y `orchestration.md`. El README y el manifest los genera `scaffold.sh` |
+| `templates/scripts/` | write-guard. `refresh.sh` y los esqueletos de `check-arch` están **pendientes** (v1.1) |
 | `scripts/scaffold.sh` | Genera el repo de agentes y sustituye tokens |
 | `scripts/upgrade.sh` | Propaga mejoras respetando lo project-owned |
 | `references/HANDOFF-arquitecto-v3.md` | La metodología completa |

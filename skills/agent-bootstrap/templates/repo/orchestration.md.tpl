@@ -54,6 +54,21 @@ anotado de vuelta en la tarea.
 **La tarjeta es el brief.** Los subagentes arrancan sin contexto: contexto, qué hacer, criterios de
 aceptación verificables, ficheros (zona de exclusión) y **fuera de alcance** explícito.
 
+## Territorio: quién es dueño de qué
+
+Cada especialista tiene sus rutas declaradas en su charter. Lo que **no** pertenece a ningún
+especialista es del **hilo principal** (la persona, o el orquestador bajo su supervisión):
+
+- La configuración de la raíz del repo: gestor de paquetes, tsconfig, build, CI
+- Los documentos normativos y de especificación del proyecto
+- Cualquier fichero que no caiga dentro de las rutas de un área
+
+El arquitecto tampoco los toca: si un ADR aceptado obliga a cambiarlos, describe el cambio exacto
+y lo aplica el hilo principal.
+
+**Precedencia**: el territorio del charter es el **techo**. Una tarjeta puede acotar lo que un
+especialista toca, pero **no puede ampliarlo** — para eso hace falta un GATE del arquitecto.
+
 ## Concurrencia
 
 - **Dos tareas con ficheros solapados no pueden estar en curso a la vez.** Los barrel files

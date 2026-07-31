@@ -11,8 +11,10 @@
 #   PREFIJO=pcf
 #   STACK="TypeScript, monorepo npm workspaces"
 #   REPO_CODIGO=/ruta/al/repo-de-codigo
-#   AREAS="core-domain:packages/core frontend-ui:packages/ui data-pipeline:packages/data"
-#   AREAS_LATENTES="backend-api devops-infra"
+#   # SOLO las áreas que YA tienen código. Un especialista sin territorio inventa
+#   # trabajo hacia su especialidad. Las demás van a AREAS_LATENTES.
+#   AREAS="core-domain:packages/core"
+#   AREAS_LATENTES="frontend-ui data-pipeline backend-api devops-infra"
 #   REGLA_DE_ORO="El núcleo no tiene dependencias y es determinista"
 #   FF_TOOL="dependency-cruiser + tests de arquitectura"
 #   COMANDO_FITNESS="npm test -- arquitectura"
@@ -40,12 +42,18 @@ source "$1"
 
 : "${DESTINO:?falta DESTINO}"; : "${PROYECTO:?falta PROYECTO}"; : "${PREFIJO:?falta PREFIJO}"
 : "${AREAS:?falta AREAS}"
-STACK="${STACK:-}"; REPO_CODIGO="${REPO_CODIGO:-}"; AREAS_LATENTES="${AREAS_LATENTES:-}"
-REGLA_DE_ORO="${REGLA_DE_ORO:-<PENDIENTE: definir la regla de oro>}"
-FF_TOOL="${FF_TOOL:-}"; COMANDO_FITNESS="${COMANDO_FITNESS:-}"
-COMANDO_VERIFICACION="${COMANDO_VERIFICACION:-}"
-FUENTES_NORMATIVAS="${FUENTES_NORMATIVAS:-}"; FUENTES_CONSTRUCCION="${FUENTES_CONSTRUCCION:-}"
-TABLERO_DESC="${TABLERO_DESC:-}"; CON_REVIEWER="${CON_REVIEWER:-0}"
+# Obligatorios: sin ellos el charter queda con huecos y el agente no puede operar.
+: "${REPO_CODIGO:?falta REPO_CODIGO — el agente necesita saber dónde está el código}"
+: "${REGLA_DE_ORO:?falta REGLA_DE_ORO — es el principio nº1 del arquitecto}"
+: "${COMANDO_VERIFICACION:?falta COMANDO_VERIFICACION — el especialista no sabría verificar}"
+: "${FUENTES_NORMATIVAS:?falta FUENTES_NORMATIVAS}"
+
+STACK="${STACK:-}"; AREAS_LATENTES="${AREAS_LATENTES:-}"
+FF_TOOL="${FF_TOOL:-pendiente de decidir}"
+COMANDO_FITNESS="${COMANDO_FITNESS:-$COMANDO_VERIFICACION}"
+FUENTES_CONSTRUCCION="${FUENTES_CONSTRUCCION:-$FUENTES_NORMATIVAS}"
+TABLERO_DESC="${TABLERO_DESC:-sin tablero configurado}"; CON_REVIEWER="${CON_REVIEWER:-0}"
+MODELO_ARQUITECTO="${MODELO_ARQUITECTO:-opus}"
 MODELO_ESPECIALISTA="${MODELO_ESPECIALISTA:-sonnet}"; MODELO_REVIEWER="${MODELO_REVIEWER:-sonnet}"
 
 [ -e "$DESTINO" ] && { echo "El destino ya existe: $DESTINO" >&2
@@ -54,6 +62,9 @@ MODELO_ESPECIALISTA="${MODELO_ESPECIALISTA:-sonnet}"; MODELO_REVIEWER="${MODELO_
 FECHA="$(date +%Y-%m-%d)"
 ARCH="$PREFIJO-architect"
 KB_PATH="$DESTINO/agents/$ARCH/knowledge-base"
+# Ruta RELATIVA al repo de agentes: es la que va en charters y guard, para que el
+# montaje sobreviva a mover, renombrar o clonar el repo en otra máquina.
+KB_REL="agents/$ARCH/knowledge-base/"
 
 # Sustituye los tokens <TOKEN> de un fichero, in-place.
 sustituir() {
@@ -63,12 +74,14 @@ import sys, pathlib
 p = pathlib.Path(sys.argv[1]); t = p.read_text(encoding="utf-8")
 for k, v in {
     "<PROYECTO>": """$PROYECTO""", "<PREFIJO>": """$PREFIJO""", "<STACK>": """$STACK""",
-    "<KB_PATH>": """$KB_PATH""", "<REGLA_DE_ORO>": """$REGLA_DE_ORO""",
+    "<KB_PATH>": """$KB_PATH""", "<KB_REL>": """$KB_REL""",
+    "<REPO_CODIGO>": """$REPO_CODIGO""", "<REGLA_DE_ORO>": """$REGLA_DE_ORO""",
     "<FF_TOOL>": """$FF_TOOL""", "<COMANDO_FITNESS>": """$COMANDO_FITNESS""",
     "<COMANDO_VERIFICACION>": """$COMANDO_VERIFICACION""",
     "<FUENTES_NORMATIVAS>": """$FUENTES_NORMATIVAS""",
     "<FUENTES_CONSTRUCCION>": """$FUENTES_CONSTRUCCION""",
     "<TABLERO_DESC>": """$TABLERO_DESC""", "<AREAS_LATENTES>": """${AREAS_LATENTES:-ninguna}""",
+    "<MODELO_ARQUITECTO>": """$MODELO_ARQUITECTO""",
     "<MODELO_ESPECIALISTA>": """$MODELO_ESPECIALISTA""",
     "<MODELO_REVIEWER>": """$MODELO_REVIEWER""",
     "<VERSION>": """$VERSION""", "<FECHA>": """$FECHA""",
@@ -139,9 +152,10 @@ cat > "$DESTINO/.bootstrap-manifest.json" <<JSON
   "reviewer": $([ "$CON_REVIEWER" = "1" ] && echo true || echo false),
   "tool_owned": [
     "install.sh",
-    "agents/*/scripts/*",
+    "agents/*/scripts/write-guard.sh",
     ".bootstrap-manifest.json"
-  ]
+  ],
+  "_nota_propiedad": "check-arch y refresh son PROJECT-OWNED: codifican reglas de este proyecto. upgrade no los toca."
 }
 JSON
 
@@ -156,14 +170,17 @@ Generado con \`agent-bootstrap\` v$VERSION el $FECHA.
 ## Instalación
 
 \`\`\`bash
-bash install.sh            # enlaza los agentes en ~/.claude/agents/
+bash install.sh            # enlaza los agentes y cablea el hook
 bash install.sh --dry-run  # ver qué haría, sin tocar nada
 \`\`\`
 
 Después, **recarga** (abre \`/hooks\` o reinicia) para que Claude los descubra.
 
-Requisitos: este repo clonado hermano del repo de código · \`jq\` si quieres que el write-guard
-actúe (sin él permite siempre, por diseño fail-safe).
+Los agentes se instalan en el **workspace** (\`../.claude/agents/\`), no globalmente: solo aparecen
+cuando trabajas en este proyecto.
+
+Requisitos: este repo clonado **hermano** del repo de código · \`jq\` para que el hook se cablee
+(sin él, \`install.sh\` avisa y no lo cablea; el guard, por diseño fail-safe, permitiría siempre).
 
 ## Los agentes
 
@@ -188,10 +205,20 @@ MD
 
 # --- verificación: cero placeholders residuales ---
 echo
-resid="$(grep -rlE '<[A-Z_]+>' "$DESTINO" 2>/dev/null | grep -v '_TEMPLATE' || true)"
+# Cero placeholders. Incluye <PENDIENTE...>, que la regex de tokens no capturaba.
+resid="$(grep -rlE '<[A-Z_]+>|<PENDIENTE' "$DESTINO" 2>/dev/null | grep -v '_TEMPLATE' || true)"
 if [ -n "$resid" ]; then
   echo "❌ Quedan placeholders sin sustituir:"; echo "$resid" | sed 's/^/   /'
-  grep -rhoE '<[A-Z_]+>' $resid 2>/dev/null | sort -u | sed 's/^/     /'
+  grep -rhoE '<[A-Z_]+>|<PENDIENTE[^>]*>' $resid 2>/dev/null | sort -u | sed 's/^/     /'
+  exit 1
+fi
+
+# Un parámetro que llegó vacío deja un backtick vacío (``) donde debía ir un comando
+# o una ruta. El agente no sabría qué ejecutar y el fallo pasaría inadvertido.
+# Dos backticks seguidos que NO formen parte de una valla ``` de bloque de código.
+vacios="$(grep -rlnE '(^|[^`])``([^`]|$)' "$DESTINO"/agents/*/*.md 2>/dev/null || true)"
+if [ -n "$vacios" ]; then
+  echo "❌ Hay parámetros vacíos (backtick sin contenido) en:"; echo "$vacios" | sed 's/^/   /'
   exit 1
 fi
 
