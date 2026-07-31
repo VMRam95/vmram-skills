@@ -2,7 +2,7 @@
 
 A curated collection of [Claude Code](https://docs.claude.com/en/docs/claude-code) skills covering VPS/DevOps, document generation, frontend tooling, email/auth integration, code reviews, and more. Most skills also work with Codex (skills are interchangeable as long as their format is preserved).
 
-40 skills, all production-tested.
+41 skills, all production-tested.
 
 ## Quick install
 
@@ -12,7 +12,7 @@ One-liner (no clone needed):
 # Install specific skills
 curl -sL https://raw.githubusercontent.com/VMRam95/vmram-skills/main/install.sh | bash -s -- conventional-commits review-pr web-search-plus
 
-# Install all 40
+# Install all 41
 curl -sL https://raw.githubusercontent.com/VMRam95/vmram-skills/main/install.sh | bash -s -- --all
 
 # Install into Codex instead of Claude
@@ -135,6 +135,7 @@ Skills with the 🟡 badge use these placeholder tokens. Replace them after inst
 | [`skill-installer`](skills/skill-installer) | 🔵 | Install skills into `$CODEX_HOME/skills` from a curated list or GitHub repo path. |
 | [`plugin-creator`](skills/plugin-creator) | 🔵 | Scaffold plugin directories with `.codex-plugin/plugin.json`. |
 | [`openai-docs`](skills/openai-docs) | 🟢 | Up-to-date official OpenAI documentation lookup with citations. |
+| [`agent-bootstrap`](skills/agent-bootstrap) | 🔵 | Bootstrap a project with its persistent agent team: an architect with a versioned knowledge base, area specialists, orchestration contracts and a write-guard hook. Generates a `<project>-agents` repo outside the code repo. |
 
 ### Unity / Stick Crisis (game project)
 
