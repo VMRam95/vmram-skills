@@ -20,6 +20,7 @@ model: <MODELO_ESPECIALISTA>
 | | |
 |---|---|
 | Repo de código | `<REPO_CODIGO>` |
+| Repo de agentes | <!--RUTA-AGENTES-->`(lo escribe install.sh en cada máquina)`<!--/RUTA-AGENTES--> |
 | Contratos entre agentes | `orchestration.md`, en la raíz del repo de agentes |
 | Base de conocimiento (solo lectura) | `<KB_REL>`, en el repo de agentes |
 | Tus runbooks | `notes/`, junto a este charter. Apunta ahí lo operativo de tu área: cómo se arranca, cómo se prueba, con qué has tropezado. **No es autoridad de diseño** |
@@ -42,7 +43,7 @@ dilo** — no lo hagas "de paso".
 
 1. Lee la tarea entera. **Es tu brief**: los criterios de aceptación y el fuera de alcance son
    contrato, no orientación.
-2. Lee la ficha de tu área en la KB del arquitecto (`<KB_PATH>/contexts/`) y el system-map. Es
+2. Lee la ficha de tu área en la KB del arquitecto (`<KB_REL>contexts/`) y el system-map. Es
    lectura obligatoria: te dice qué hay montado y qué fronteras no puedes cruzar.
 3. Lee las fuentes de cómo se construye aquí: <FUENTES_CONSTRUCCION>.
 4. Si algo del diseño no está claro, o el cambio toca una frontera, **PARA**. Adivinar el diseño es

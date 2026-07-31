@@ -27,7 +27,9 @@ command -v jq >/dev/null 2>&1 || { echo "Hace falta 'jq'" >&2; exit 1; }
 VERSION_PROY="$(jq -r '.version' "$MANIFEST")"
 PREFIJO="$(jq -r '.prefijo' "$MANIFEST")"
 PROYECTO="$(jq -r '.proyecto' "$MANIFEST")"
-KB_PATH="$DESTINO/agents/$PREFIJO-architect/knowledge-base"
+REPO_CODIGO="$(jq -r '.repo_codigo // ""' "$MANIFEST")"
+MODELO_ARQUITECTO="$(jq -r '.modelo_arquitecto // "opus"' "$MANIFEST")"
+KB_REL="agents/$PREFIJO-architect/knowledge-base/"
 
 # Los templates llevan tokens <TOKEN>. Al propagarlos hay que re-sustituirlos con los
 # parámetros que este proyecto ya tiene en su manifest, o el fichero queda inservible.
@@ -36,7 +38,9 @@ sustituir_tokens() {
   sed -i.tmp \
     -e "s|<PREFIJO>|$PREFIJO|g" \
     -e "s|<PROYECTO>|$PROYECTO|g" \
-    -e "s|<KB_PATH>|$KB_PATH|g" \
+    -e "s|<KB_REL>|$KB_REL|g" \
+    -e "s|<REPO_CODIGO>|$REPO_CODIGO|g" \
+    -e "s|<MODELO_ARQUITECTO>|$MODELO_ARQUITECTO|g" \
     -e "s|<VERSION>|$VERSION_SKILL|g" "$f"
   rm -f "$f.tmp"
 }
@@ -82,8 +86,8 @@ comparar "$SKILL_DIR/templates/repo/install.sh" "$DESTINO/install.sh" "install.s
 GUARD_DEST="$DESTINO/agents/$PREFIJO-architect/scripts/write-guard.sh"
 if [ -f "$GUARD_DEST" ]; then
   tmp_a="$(mktemp)"; tmp_b="$(mktemp)"
-  grep -vE '^(AGENTE_PROTEGIDO|KB_PATH)=' "$SKILL_DIR/templates/scripts/write-guard.sh.tpl" > "$tmp_a"
-  grep -vE '^(AGENTE_PROTEGIDO|KB_PATH)=' "$GUARD_DEST" > "$tmp_b"
+  grep -vE '^AGENTE_PROTEGIDO=' "$SKILL_DIR/templates/scripts/write-guard.sh.tpl" > "$tmp_a"
+  grep -vE '^AGENTE_PROTEGIDO=' "$GUARD_DEST" > "$tmp_b"
   diff -q "$tmp_a" "$tmp_b" >/dev/null 2>&1 || { echo "  ~ write-guard.sh (conserva sus parámetros)"; CAMBIOS+=("GUARD|$GUARD_DEST"); }
   rm -f "$tmp_a" "$tmp_b"
 fi
@@ -110,8 +114,10 @@ for c in "${CAMBIOS[@]:-}"; do
   cp "$destino" "$destino.bak.$(date +%Y%m%d%H%M%S)"
   if [ "$origen" = "GUARD" ]; then
     # Regenera el guard conservando sus dos parámetros
-    ag="$(grep -E '^AGENTE_PROTEGIDO=' "$destino")"; kb="$(grep -E '^KB_PATH=' "$destino")"
-    sed -e "s|^AGENTE_PROTEGIDO=.*|$ag|" -e "s|^KB_PATH=.*|$kb|" \
+    # Los parámetros del guard se conservan. Si faltan, se reconstruyen del manifest
+    # en vez de dejar que `set -e` aborte a medias sin decir nada.
+    ag="$(grep -E '^AGENTE_PROTEGIDO=' "$destino" || echo "AGENTE_PROTEGIDO=\"$PREFIJO-architect\"")"
+    sed -e "s|^AGENTE_PROTEGIDO=.*|$ag|" \
         "$SKILL_DIR/templates/scripts/write-guard.sh.tpl" > "$destino"
     chmod +x "$destino"
   else

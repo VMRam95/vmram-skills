@@ -31,9 +31,9 @@ Declara el modo en la primera línea al invocar la skill.
 | Modo | Cuándo | Qué hace |
 |---|---|---|
 | **INIT** (por defecto) | Proyecto sin capa de agentes | Entrevista → recon → genera `<proyecto>-agents` con charters y KB sembrada → bootstrap del arquitecto |
-| **ADD-AREA** | El proyecto desarrolla un área que estaba latente | Instancia el especialista desde el template y lo registra; el arquitecto lo onboarda |
+| **ADD-AREA** ⚠️ | El proyecto desarrolla un área que estaba latente | Instancia el especialista desde el template y lo registra. **Sin procedimiento detallado todavía** (v1.1) |
 | **UPGRADE** | Has mejorado la metodología y quieres propagarla | Compara el manifest del proyecto con `VERSION`, diffea **solo lo tool-owned** y aplica con confirmación |
-| **STATUS** | Duda de si la capa sigue coherente | Verifica symlinks, hook, manifest, cobertura de la KB y áreas latentes |
+| **STATUS** ⚠️ | Duda de si la capa sigue coherente | Verifica symlinks, hook, manifest y cobertura de la KB. **Sin procedimiento detallado todavía** (v1.1) |
 
 ---
 
@@ -54,10 +54,10 @@ sobreviven a que el repo se mueva o se renombre. El hogar es un repo dedicado
     │   ├── <p>-architect.md
     │   ├── knowledge-base/
     │   │   ├── README.md  system-map.md  fitness-functions.md
-    │   │   ├── tech-debt.md  scorecard.md  AUDIT-REPORT.md  BOOTSTRAP.md
+    │   │   ├── tech-debt.md  scorecard.md  BOOTSTRAP.md
     │   │   ├── contexts/  (_TEMPLATE.md + una ficha por módulo)
     │   │   └── adr/       (_TEMPLATE.md + ADR-NNN-*.md)
-    │   └── scripts/       (check-arch, refresh.sh, write-guard.sh)
+    │   └── scripts/       (write-guard.sh; check-arch lo escribe el proyecto)
     ├── <p>-<area>-dev/            # especialistas: charter + notes/, SIN KB propia
     └── <p>-reviewer/              # opcional
 ```
@@ -265,13 +265,24 @@ donde además supervisa el humano.
 Refuerza a nivel de harness el límite "el arquitecto sólo escribe en su KB". Los hooks
 `PreToolUse` se disparan dentro de subagentes y el payload incluye el tipo de agente.
 
-Se instala en el **workspace** (`../.claude/`, junto al repo de código), no en el ámbito de usuario:
-los agentes de un proyecto no deben aparecer en todas tus sesiones. `install.sh` lo cablea con la
-ruta absoluta de cada máquina, haciendo copia de seguridad y merge no destructivo del `settings.json`.
+**Dos ámbitos distintos, y es deliberado.** Los **agentes** se enlazan en el workspace
+(`../.claude/agents/`), para que solo aparezcan en este proyecto. El **hook**, en cambio, va al
+`settings.json` **de usuario** — porque Claude Code no lee settings de directorios padre: solo de la
+raíz del repo de la sesión, del ámbito de usuario y de la política gestionada. Un hook en el
+workspace **no se cargaría nunca**. Que sea de usuario es inofensivo: el guard filtra por tipo de
+agente y es fail-safe, así que solo actúa sobre el arquitecto de este proyecto. Es la vía que
+prescribe el handoff: hook global con filtro en el script.
+
+`install.sh` lo cablea con la ruta absoluta de cada máquina, con copia de seguridad y merge no
+destructivo, y **avisa si el merge falla** en vez de dar éxito por supuesto.
 
 **Diséñalo fail-safe**: bloquea **sólo** si el agente coincide **y** la ruta está fuera de la KB.
-Matchea por **sufijo de ruta**, nunca por ruta absoluta: así el repo se puede mover, renombrar o
-clonar en otra máquina sin que el guard deje de proteger.
+
+**Calcula la ruta de la KB en tiempo de ejecución**, desde la ubicación del propio script — ni la
+hornea al generar el proyecto, ni la compara por sufijo. Horneada, deja de proteger en cuanto mueves
+el repo. Por sufijo, se elude construyendo una ruta que lo contenga. Calculada en runtime y comparada
+por prefijo absoluto **normalizado** (resolviendo `..` incluso cuando el directorio aún no existe),
+sobrevive a mover el repo y no se puede rodear.
 Cualquier otro caso —otro agente, JSON inválido, falta `jq`— **permite**. Así es imposible
 sobre-bloquear. Pruébalo con payloads simulados antes de confiar en él.
 
@@ -326,9 +337,10 @@ sobre-bloquear. Pruébalo con payloads simulados antes de confiar en él.
 
 **Propiedad de los ficheros** — lo que hace posible actualizar sin pisar:
 
-- **tool-owned**: `install.sh`, `scripts/*`, y las secciones estructurales de los charters (modos,
-  formatos de salida). `upgrade` los actualiza mostrando el diff.
-- **project-owned**: toda la KB, los ADRs, los principios rectores, la regla de oro. `upgrade`
-  **nunca** los toca.
-- En los ficheros mixtos, las secciones van marcadas con `<!-- tool-owned -->` y
-  `<!-- project-owned -->`.
+- **tool-owned** — `upgrade` los actualiza mostrando el diff: `install.sh` y `write-guard.sh`.
+- **project-owned** — `upgrade` **nunca** los toca: toda la KB, los ADRs, los principios rectores,
+  la regla de oro, y también `check-arch` y `refresh`, que codifican reglas **de ese proyecto**.
+- **Los charters, en la práctica, son project-owned.** Los marcadores `<!-- tool-owned -->` que
+  llevan dentro sirven para orientar a quien los edite a mano, pero `upgrade` **no los sincroniza**:
+  en cuanto se llenan de contenido real, un diff por secciones deja de ser viable. Cuando cambie la
+  metodología, lo que se propaga es el **CHANGELOG**, y la revisión es manual.

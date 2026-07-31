@@ -42,3 +42,10 @@ scaffolder.
   diff por secciones deja de ser viable. `upgrade` no intenta sincronizarlos: para eso está el
   changelog.
 - **No cubre agentes de dominio no-código** (del estilo de `vetimoly-agents`).
+- **El perfil S/M/L es guía de la entrevista, no un parámetro.** `scaffold.sh` genera siempre el
+  mismo conjunto de ficheros; la proporcionalidad la aplica quien conduce el montaje, no el script.
+- **Los parámetros obligatorios bloquean un greenfield puro.** Un proyecto sin documentos
+  normativos ni comando de verificación no puede scaffoldearse sin inventarse valores. Es
+  deliberado —un charter con huecos no sirve— pero es un montaje legítimo que hoy se rechaza.
+- **`AREAS` no valida su formato.** `core-domain:` (sin rutas) genera un especialista sin
+  territorio y pasa todas las comprobaciones.

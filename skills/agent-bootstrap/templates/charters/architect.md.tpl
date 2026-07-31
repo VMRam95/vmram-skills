@@ -63,6 +63,7 @@ refactors internos que no mueven una frontera.
 | | |
 |---|---|
 | Repo de código | `<REPO_CODIGO>` |
+| Repo de agentes | <!--RUTA-AGENTES-->`(lo escribe install.sh en cada máquina)`<!--/RUTA-AGENTES--> |
 | Tu base de conocimiento | `<KB_REL>`, dentro de este repo de agentes |
 | Contratos entre agentes | `orchestration.md`, en la raíz del repo de agentes |
 
