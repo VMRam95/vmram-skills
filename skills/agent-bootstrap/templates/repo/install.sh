@@ -58,7 +58,7 @@ echo "Agentes:   $AGENTS_DIR"
 echo "Hook:      $SETTINGS"
 echo
 
-n_linked=0; n_ok=0; n_skipped=0
+n_linked=0; n_ok=0; n_skipped=0; hook_fallo=0
 
 # R8: si el "workspace" resulta ser una carpeta con muchos repos dentro, los agentes
 # de este proyecto acabarían compartidos con todos ellos — justo lo contrario de lo
@@ -122,6 +122,7 @@ else
   mkdir -p "$CLAUDE_DIR"
   [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
   if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
+    hook_fallo=1
     echo "${C_ERR}✗  $SETTINGS no es JSON válido. No lo toco.${C_OFF}"
   else
     # ¿Ya estaba? Entonces no tocamos nada y no dejamos copia de más.
@@ -131,7 +132,7 @@ else
       echo "${C_DIM}✓  ya estaba cableado${C_OFF}"
     else
       copia="$SETTINGS.bak.$(date +%Y%m%d%H%M%S)"
-      cp "$SETTINGS" "$copia"
+      cp "$SETTINGS" "$copia" 2>/dev/null || { hook_fallo=1; copia=""; }
       if jq --arg m "$MATCHER" --arg c "$GUARD" '
             .hooks //= {} | .hooks.PreToolUse //= [] |
             .hooks.PreToolUse += [{"matcher": $m, "hooks": [{"type": "command", "command": $c}]}]
@@ -140,6 +141,7 @@ else
         echo "${C_OK}→  cableado en $SETTINGS${C_OFF} ${C_DIM}(copia en $(basename "$copia"))${C_OFF}"
       else
         rm -f "$SETTINGS.tmp"; rm -f "$copia"
+        hook_fallo=1
         echo "${C_ERR}✗  el merge falló: settings.json intacto, hook SIN cablear.${C_OFF}"
         echo "${C_ERR}   Revisa la forma de .hooks.PreToolUse (debe ser una lista).${C_OFF}"
       fi
@@ -168,4 +170,5 @@ fi
 echo
 echo "${C_OK}Enlazados: $n_linked${C_OFF} · ya estaban: $n_ok · saltados: $n_skipped"
 [ "$n_linked" -gt 0 ] && [ "$DRY_RUN" -eq 0 ] && echo "${C_WARN}Recuerda recargar (/hooks o reiniciar) para que Claude los descubra.${C_OFF}"
+[ "$hook_fallo" -eq 0 ] || exit 1
 exit 0
