@@ -188,11 +188,11 @@ hook que los limita.
 
 ## Qué hay
 
-| Carpeta | Qué es |
-|---|---|
-| \`$PREFIJO-agents/\` | Los agentes y la base de conocimiento del arquitecto |
-| \`$PREFIJO-skills/\` | Skills propias del proyecto |
-$(for r in $repos_dentro; do echo "| \`$r/\` | Código |"; done)
+| Carpeta | Qué es | Estado |
+|---|---|---|
+| \`$PREFIJO-agents/\` | Los agentes y la base de conocimiento del arquitecto | ⏳ **sin montar todavía** — se crea con \`agent-bootstrap\` en modo INIT |
+| \`$PREFIJO-skills/\` | Skills propias del proyecto | ✅ creado, catálogo vacío |
+$(for r in $repos_dentro; do echo "| \`$r/\` | Código | ✅ |"; done)
 
 ## Los agentes
 
@@ -201,7 +201,12 @@ Contratos y orden de trabajo: [\`$PREFIJO-agents/orchestration.md\`]($PREFIJO-ag
 Lo que decide el arquitecto se registra en su base de conocimiento; lo que se hace, en
 el tablero de tareas. No se duplica entre ambos.
 
-## Instalación tras clonar
+## Instalación
+
+Mientras \`$PREFIJO-agents/\` no exista, aquí no hay agentes cargados: móntalo primero con
+\`agent-bootstrap\` en modo INIT.
+
+Una vez montado —o al clonar el workspace en otra máquina:
 
 \`\`\`bash
 bash $PREFIJO-agents/install.sh
