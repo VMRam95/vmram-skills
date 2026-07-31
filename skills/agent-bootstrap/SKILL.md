@@ -30,6 +30,7 @@ Declara el modo en la primera línea al invocar la skill.
 
 | Modo | Cuándo | Qué hace |
 |---|---|---|
+| **WORKSPACE** | Los repos del proyecto viven sueltos, sin carpeta paraguas | Crea el workspace, mueve dentro los repos, crea el repo de skills del proyecto y deja el `.claude/` listo. **Es el paso previo a INIT** |
 | **INIT** (por defecto) | Proyecto sin capa de agentes | Entrevista → recon → genera `<proyecto>-agents` con charters y KB sembrada → bootstrap del arquitecto |
 | **ADD-AREA** ⚠️ | El proyecto desarrolla un área que estaba latente | Instancia el especialista desde el template y lo registra. **Sin procedimiento detallado todavía** (v1.1) |
 | **UPGRADE** | Has mejorado la metodología y quieres propagarla | Compara el manifest del proyecto con `VERSION`, diffea **solo lo tool-owned** y aplica con confirmación |
@@ -41,7 +42,37 @@ Declara el modo en la primera línea al invocar la skill.
 
 **La KB y los charters viven FUERA del repo de código.** Nunca contaminan el entregable y
 sobreviven a que el repo se mueva o se renombre. El hogar es un repo dedicado
-`<proyecto>-agents`, clonado hermano del repo de código, versionado desde el minuto uno.
+`<proyecto>-agents`, hermano del repo de código dentro de un **workspace**.
+
+### El workspace
+
+Una **carpeta paraguas por proyecto** —no un repo git— que agrupa como hermanos todo lo del
+proyecto y aloja el `.claude/` desde el que se abren las sesiones:
+
+```
+<proyecto>-workspace/
+├── .claude/
+│   ├── settings.json          el hook write-guard, cableado por install.sh
+│   └── agents/                symlinks a los charters
+├── .gitignore                 ignora los repos hijos: no son submódulos
+├── CLAUDE.md                  normativa a nivel workspace
+├── README.md
+├── docs/                      documentación cross-repo (opcional)
+├── <prefijo>-agents/          la capa de agentes
+├── <prefijo>-skills/          skills propias del proyecto
+└── <repo de código>/          uno o varios
+```
+
+> ⚠️ **Las sesiones se abren DESDE el workspace**, no desde dentro de un repo hijo. Claude Code
+> lee el `.claude/` del directorio donde arranca la sesión: solo abriendo en el workspace se
+> cargan los agentes del proyecto y el hook que los limita. Abrir dentro de un repo hijo deja
+> el hook sin efecto.
+
+Sin workspace, `install.sh` toma como paraguas el directorio padre del repo de agentes — y si
+ahí cuelgan cuarenta proyectos más, los agentes se comparten con todos. El script lo detecta y
+avisa, pero la solución es montar el workspace.
+
+### Dentro, la capa de agentes
 
 ```
 <proyecto>-agents/
@@ -102,6 +133,15 @@ costura y el diseño deriva. Los especialistas tienen `notes/` con runbooks oper
 ---
 
 ## Modo INIT — el proceso
+
+### Fase 0 · Workspace
+
+Si el proyecto aún no tiene carpeta paraguas, móntala primero (modo **WORKSPACE**): sin ella el
+`.claude/` acaba en un sitio compartido y el hook no protege lo que dice proteger.
+
+`scripts/workspace.sh` la crea, mueve dentro los repos que le indiques —y **se niega a mover uno
+con cambios sin commitear**, que sería la forma más tonta de perder trabajo—, crea el repo de
+skills del proyecto y deja el `.claude/` preparado.
 
 ### Fase 1 · Recon (antes de preguntar nada)
 
@@ -331,6 +371,7 @@ sobre-bloquear. Pruébalo con payloads simulados antes de confiar en él.
 | `templates/kb/` | Esqueleto de la base de conocimiento |
 | `templates/repo/` | `install.sh` y `orchestration.md`. El README y el manifest los genera `scaffold.sh` |
 | `templates/scripts/` | write-guard. `refresh.sh` y los esqueletos de `check-arch` están **pendientes** (v1.1) |
+| `scripts/workspace.sh` | Crea la carpeta paraguas del proyecto y coloca dentro sus repos |
 | `scripts/scaffold.sh` | Genera el repo de agentes y sustituye tokens |
 | `scripts/upgrade.sh` | Propaga mejoras respetando lo project-owned |
 | `references/HANDOFF-arquitecto-v3.md` | La metodología completa |

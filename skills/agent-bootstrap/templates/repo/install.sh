@@ -4,15 +4,14 @@
 #              write-guard como hook de usuario.
 #
 # Dos ámbitos distintos, y es deliberado:
-#   · AGENTES  → <workspace>/.claude/agents/  (solo aparecen en este proyecto)
-#   · HOOK     → ~/.claude/settings.json      (ámbito de usuario)
+#   · AGENTES  → <workspace>/.claude/agents/
+#   · HOOK     → <workspace>/.claude/settings.json
 #
-# El hook va a usuario porque Claude Code NO lee settings.json de directorios
-# padre: solo de la raíz del repo de la sesión, del ámbito de usuario y de la
-# política gestionada. Un hook en el workspace no se cargaría nunca.
-# Que sea global es inofensivo: el guard filtra por agent_type y es fail-safe,
-# así que solo actúa sobre el arquitecto de ESTE proyecto y ante cualquier duda
-# permite. Es exactamente la vía que prescribe el handoff (§9).
+# Ambos a nivel de WORKSPACE, y por eso las sesiones de Claude se abren DESDE el
+# workspace, no desde dentro de un repo. Claude Code lee los settings del
+# directorio donde arranca la sesión: si abres desde el workspace, este es el
+# fichero que carga. Si abrieras desde dentro de un repo hijo, no lo leería.
+# Es el patrón verificado en producción del workspace multi-repo de referencia.
 #
 #   bash install.sh              # instala
 #   bash install.sh --dry-run    # enseña lo que haría, sin tocar nada
@@ -41,8 +40,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(cd "$REPO_DIR/.." && pwd)"
 CLAUDE_DIR="${CLAUDE_HOME:-$WORKSPACE/.claude}"
 AGENTS_DIR="$CLAUDE_DIR/agents"
-# El hook, en ámbito de usuario: es el único que Claude Code carga siempre.
-SETTINGS="${HOME}/.claude/settings.json"
+SETTINGS="$CLAUDE_DIR/settings.json"
 MATCHER="Write|Edit|NotebookEdit"
 
 if [ -t 1 ]; then
@@ -66,9 +64,8 @@ n_linked=0; n_ok=0; n_skipped=0; hook_fallo=0
 n_hermanos="$(find "$WORKSPACE" -maxdepth 1 -type d -not -path "$WORKSPACE" 2>/dev/null | wc -l | tr -d ' ')"
 if [ "${n_hermanos:-0}" -gt 6 ]; then
   echo "${C_WARN}⚠  $WORKSPACE contiene $n_hermanos carpetas: no parece un workspace por proyecto.${C_OFF}"
-  echo "${C_WARN}   Los agentes se compartirían con todo lo que cuelgue de ahí.${C_OFF}"
-  echo "${C_WARN}   Recomendado: mover este repo y el de código a una carpeta paraguas propia,${C_OFF}"
-  echo "${C_WARN}   o exportar CLAUDE_HOME apuntando al .claude que quieras usar.${C_OFF}"
+  echo "${C_WARN}   Los agentes y el hook se compartirían con todo lo que cuelgue de ahí.${C_OFF}"
+  echo "${C_WARN}   Monta un workspace propio con: agent-bootstrap workspace${C_OFF}"
   echo
 fi
 
@@ -131,16 +128,25 @@ else
          "$SETTINGS" >/dev/null 2>&1; then
       echo "${C_DIM}✓  ya estaba cableado${C_OFF}"
     else
-      copia="$SETTINGS.bak.$(date +%Y%m%d%H%M%S)"
-      cp "$SETTINGS" "$copia" 2>/dev/null || { hook_fallo=1; copia=""; }
+      # Solo hacemos copia si había algo que preservar: si el fichero lo acabamos
+      # de crear vacío, una copia de "{}" es ruido en el directorio.
+      copia=""
+      if [ -s "$SETTINGS" ] && [ "$(tr -d '[:space:]' < "$SETTINGS")" != "{}" ]; then
+        copia="$SETTINGS.bak.$(date +%Y%m%d%H%M%S)"
+        cp "$SETTINGS" "$copia" 2>/dev/null || { hook_fallo=1; copia=""; }
+      fi
       if jq --arg m "$MATCHER" --arg c "$GUARD" '
             .hooks //= {} | .hooks.PreToolUse //= [] |
             .hooks.PreToolUse += [{"matcher": $m, "hooks": [{"type": "command", "command": $c}]}]
           ' "$SETTINGS" > "$SETTINGS.tmp" 2>/dev/null && [ -s "$SETTINGS.tmp" ]; then
         mv "$SETTINGS.tmp" "$SETTINGS"
-        echo "${C_OK}→  cableado en $SETTINGS${C_OFF} ${C_DIM}(copia en $(basename "$copia"))${C_OFF}"
+        if [ -n "$copia" ]; then
+          echo "${C_OK}→  cableado en $SETTINGS${C_OFF} ${C_DIM}(copia en $(basename "$copia"))${C_OFF}"
+        else
+          echo "${C_OK}→  cableado en $SETTINGS${C_OFF}"
+        fi
       else
-        rm -f "$SETTINGS.tmp"; rm -f "$copia"
+        rm -f "$SETTINGS.tmp"; [ -n "$copia" ] && rm -f "$copia"
         hook_fallo=1
         echo "${C_ERR}✗  el merge falló: settings.json intacto, hook SIN cablear.${C_OFF}"
         echo "${C_ERR}   Revisa la forma de .hooks.PreToolUse (debe ser una lista).${C_OFF}"
