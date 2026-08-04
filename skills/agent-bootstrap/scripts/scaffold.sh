@@ -181,27 +181,59 @@ sustituir "$DESTINO/install.sh"; sustituir "$DESTINO/orchestration.md"
 
 printf '%s\n' "node_modules/" ".DS_Store" "*.bak.*" > "$DESTINO/.gitignore"
 
-latentes_json=""
-for a in $AREAS_LATENTES; do latentes_json="$latentes_json\"$a\","; done
-cat > "$DESTINO/.bootstrap-manifest.json" <<JSON
-{
-  "herramienta": "agent-bootstrap",
-  "version": "$VERSION",
-  "generado": "$FECHA",
-  "proyecto": "$PROYECTO",
-  "prefijo": "$PREFIJO",
-  "repo_codigo": "$REPO_CODIGO",
-  "areas_instanciadas": [$(IFS=,; echo "${AREAS_JSON[*]:-}")],
-  "areas_latentes": [${latentes_json%,}],
-  "reviewer": $([ "$CON_REVIEWER" = "1" ] && echo true || echo false),
-  "tool_owned": [
-    "install.sh",
-    "agents/*/scripts/write-guard.sh",
-    ".bootstrap-manifest.json"
-  ],
-  "_nota_propiedad": "check-arch y refresh son PROJECT-OWNED: codifican reglas de este proyecto. upgrade no los toca."
+# El manifiesto se escribe con python y no con un heredoc: una REGLA_DE_ORO con comillas
+# dobles —o cualquier parámetro con caracteres de escape— produciría un JSON inválido, y el
+# montaje quedaría con un manifiesto ilegible que ni `status` ni `upgrade` podrían leer.
+#
+# Guarda además los `parametros` del montaje. Sin ellos, `add-area` tendría que volver a
+# preguntar por la regla de oro y los comandos, o —peor— inventárselos, y el especialista
+# nuevo nacería con un charter distinto del de sus hermanos.
+AB_AREAS_JSON="$(IFS=,; echo "${AREAS_JSON[*]:-}")" \
+AB_LATENTES="$AREAS_LATENTES" AB_VERSION="$VERSION" AB_FECHA="$FECHA" \
+AB_PROYECTO="$PROYECTO" AB_PREFIJO="$PREFIJO" AB_REPO_CODIGO="$REPO_CODIGO" \
+AB_REVIEWER="$CON_REVIEWER" AB_STACK="$STACK" AB_REGLA_DE_ORO="$REGLA_DE_ORO" \
+AB_FF_TOOL="$FF_TOOL" AB_COMANDO_FITNESS="$COMANDO_FITNESS" \
+AB_COMANDO_VERIFICACION="$COMANDO_VERIFICACION" \
+AB_FUENTES_NORMATIVAS="$FUENTES_NORMATIVAS" AB_FUENTES_CONSTRUCCION="$FUENTES_CONSTRUCCION" \
+AB_TABLERO_DESC="$TABLERO_DESC" AB_MODELO_ARQUITECTO="$MODELO_ARQUITECTO" \
+AB_MODELO_ESPECIALISTA="$MODELO_ESPECIALISTA" AB_MODELO_REVIEWER="$MODELO_REVIEWER" \
+python3 - "$DESTINO/.bootstrap-manifest.json" <<'PY'
+import json, os, sys
+
+env = os.environ.get
+areas = env("AB_AREAS_JSON", "").strip()
+manifest = {
+    "herramienta": "agent-bootstrap",
+    "version": env("AB_VERSION", ""),
+    "generado": env("AB_FECHA", ""),
+    "proyecto": env("AB_PROYECTO", ""),
+    "prefijo": env("AB_PREFIJO", ""),
+    "repo_codigo": env("AB_REPO_CODIGO", ""),
+    "areas_instanciadas": json.loads("[" + areas + "]") if areas else [],
+    "areas_latentes": env("AB_LATENTES", "").split(),
+    "reviewer": env("AB_REVIEWER", "0") == "1",
+    "parametros": {
+        "stack": env("AB_STACK", ""),
+        "regla_de_oro": env("AB_REGLA_DE_ORO", ""),
+        "ff_tool": env("AB_FF_TOOL", ""),
+        "comando_fitness": env("AB_COMANDO_FITNESS", ""),
+        "comando_verificacion": env("AB_COMANDO_VERIFICACION", ""),
+        "fuentes_normativas": env("AB_FUENTES_NORMATIVAS", ""),
+        "fuentes_construccion": env("AB_FUENTES_CONSTRUCCION", ""),
+        "tablero_desc": env("AB_TABLERO_DESC", ""),
+        "modelo_arquitecto": env("AB_MODELO_ARQUITECTO", ""),
+        "modelo_especialista": env("AB_MODELO_ESPECIALISTA", ""),
+        "modelo_reviewer": env("AB_MODELO_REVIEWER", ""),
+    },
+    "tool_owned": [
+        "install.sh",
+        "agents/*/scripts/write-guard.sh",
+        ".bootstrap-manifest.json",
+    ],
+    "_nota_propiedad": "check-arch y refresh son PROJECT-OWNED: codifican reglas de este proyecto. upgrade no los toca.",
 }
-JSON
+open(sys.argv[1], "w", encoding="utf-8").write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+PY
 
 cat > "$DESTINO/README.md" <<MD
 # Agentes de $PROYECTO

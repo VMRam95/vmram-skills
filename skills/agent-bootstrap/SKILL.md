@@ -32,9 +32,9 @@ Declara el modo en la primera línea al invocar la skill.
 |---|---|---|
 | **WORKSPACE** | Los repos del proyecto viven sueltos, sin carpeta paraguas | Crea el workspace, mueve dentro los repos, crea el repo de skills del proyecto y deja el `.claude/` listo. **Es el paso previo a INIT** |
 | **INIT** (por defecto) | Proyecto sin capa de agentes | Entrevista → recon → genera `<proyecto>-agents` con charters y KB sembrada → bootstrap del arquitecto |
-| **ADD-AREA** ⚠️ | El proyecto desarrolla un área que estaba latente | Instancia el especialista desde el template y lo registra. **Sin procedimiento detallado todavía** (v1.1) |
+| **ADD-AREA** | El proyecto desarrolla un área que estaba latente | `scripts/add-area.sh`: instancia el especialista, hereda los parámetros del montaje y lo mueve de latente a instanciada en el manifest. **Se niega si el territorio no existe** |
 | **UPGRADE** | Has mejorado la metodología y quieres propagarla | Compara el manifest del proyecto con `VERSION`, diffea **solo lo tool-owned** y aplica con confirmación |
-| **STATUS** ⚠️ | Duda de si la capa sigue coherente | Verifica symlinks, hook, manifest y cobertura de la KB. **Sin procedimiento detallado todavía** (v1.1) |
+| **STATUS** | Duda de si la capa sigue coherente | `scripts/status.sh`: audita entorno, charters, enlaces, hook, KB y áreas. `exit 1` si algo está roto, así que sirve en CI |
 
 ---
 
@@ -235,6 +235,60 @@ Después: `install.sh`, hook, recordar el reload, commit inicial.
 
 ---
 
+## Modo ADD-AREA — activar un área latente
+
+Un área latente se activa **cuando nace su código, no cuando se planea**. El script lo fuerza:
+
+```bash
+bash scripts/add-area.sh <repo-de-agentes> <area> <rutas> [--modelo sonnet] [--dry-run]
+bash scripts/add-area.sh ~/proy/pcf-agents frontend-ui packages/ui
+```
+
+Se niega en tres casos, y los tres son a propósito:
+
+1. **El territorio no existe.** Es la comprobación que da sentido al catálogo de áreas latentes:
+   un especialista sin territorio empuja trabajo hacia su especialidad. Crea el código primero.
+2. **El área no está en las latentes del manifest.** Si es un área nueva del catálogo, se añade
+   antes a mano — así instanciar un área siempre es una decisión, nunca un descuido.
+3. **El área ya está instanciada.** Para cambiar sus rutas se edita su charter, no se re-instancia.
+
+Hereda del manifest los parámetros del montaje (regla de oro, comandos, fuentes), de modo que el
+charter nuevo sale idéntico en forma al de sus hermanos. En montajes de v1.0.0, que no los
+guardaba, los deduce del charter de otro especialista y lo dice.
+
+**Lo que el script no hace, y hay que hacer después** — lo recuerda al terminar: correr
+`install.sh`, **recargar la sesión** (hasta entonces el agente no es descubrible), pedir al
+arquitecto un `REFRESH` para que onboarde el módulo nuevo —si no, nace sin gobierno— y rellenar los
+*gotchas* del charter, que son project-owned y salen vacíos.
+
+---
+
+## Modo STATUS — auditar un montaje
+
+```bash
+bash scripts/status.sh <repo-de-agentes> [--claude-home <ruta>]
+```
+
+`exit 0` si no hay nada roto, `exit 1` si lo hay: sirve en CI y en un hook.
+
+Comprueba, en este orden:
+
+| Bloque | Qué mira |
+|---|---|
+| **Entorno** | Si la versión del proyecto y la de la skill divergen (→ `UPGRADE`), y **si la skill instalada es una copia que se ha quedado atrás** |
+| **Charters** | Que existen, que el frontmatter **abre en la línea 1** y que el `name` coincide con el directorio |
+| **Instalación** | Que cada agente está enlazado y que ningún enlace está roto |
+| **Write-guard** | Que existe, es ejecutable y **está cableado** en el `settings.json` que corresponde |
+| **KB** | Placeholders sin sustituir, fichas frente a módulos del system-map, ADRs, y si el BOOTSTRAP está superado |
+| **Áreas** | Que el territorio de cada área instanciada existe de verdad, y cuáles siguen latentes |
+
+**Por qué el bloque de entorno va primero.** El fallo más caro que ha tenido esta herramienta no fue
+un bug: fue una **copia instalada que se quedó vieja sin que nada lo dijera**. Tenía el mismo número
+de `VERSION` que el repo, así que era indistinguible de una copia al día, y generó durante semanas
+charters con un defecto ya corregido upstream. Si instalas con `--link`, no puede pasar.
+
+---
+
 ## Integración con el tablero de tareas
 
 **Lo duradero vive en git** (spec, ADRs, KB — el *porqué*). **Lo efímero vive en el tablero**
@@ -373,6 +427,8 @@ sobre-bloquear. Pruébalo con payloads simulados antes de confiar en él.
 | `templates/scripts/` | write-guard. `refresh.sh` y los esqueletos de `check-arch` están **pendientes** (v1.1) |
 | `scripts/workspace.sh` | Crea la carpeta paraguas del proyecto y coloca dentro sus repos |
 | `scripts/scaffold.sh` | Genera el repo de agentes y sustituye tokens |
+| `scripts/add-area.sh` | Instancia un especialista de un área latente y lo registra |
+| `scripts/status.sh` | Audita un montaje existente. `exit 1` si hay algo roto |
 | `scripts/upgrade.sh` | Propaga mejoras respetando lo project-owned |
 | `references/HANDOFF-arquitecto-v3.md` | La metodología completa |
 

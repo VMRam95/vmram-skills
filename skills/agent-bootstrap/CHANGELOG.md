@@ -3,6 +3,45 @@
 Versionado semántico de la **metodología**. Un cambio mayor implica que los proyectos ya
 inicializados necesitan revisión manual al hacer `upgrade`.
 
+## 1.1.0 — 2026-08-04
+
+Cierra los tres huecos que quedaban declarados en la v1.0.0, más dos fallos encontrados al
+revisarla. Todo salió de montar un proyecto real con ella.
+
+**`ADD-AREA` y `STATUS` dejan de ser una descripción y pasan a ser scripts.**
+
+- `scripts/add-area.sh` instancia un especialista de un área latente, hereda los parámetros del
+  montaje y lo mueve de latente a instanciada en el manifest. **Se niega si el territorio no
+  existe**, que es lo que da sentido al catálogo de áreas latentes: un especialista sin territorio
+  empuja trabajo hacia su especialidad.
+- `scripts/status.sh` audita entorno, charters, enlaces, hook, base de conocimiento y áreas.
+  `exit 1` si hay algo roto, así que sirve en CI. Probado contra un montaje sano y contra uno roto
+  a propósito: caza el frontmatter mal colocado, los agentes sin enlazar, el guard sin cablear y la
+  KB sin sembrar.
+
+**El fallo que motivó todo esto: una skill instalada que se queda vieja en silencio.**
+
+- `install.sh` del repo gana `--link`, que enlaza en vez de copiar. Una copia es una foto: editas
+  el repo y la instalada no cambia, y **su propio `VERSION` sigue diciendo el número viejo**, así
+  que es indistinguible de una al día. Esta herramienta pasó semanas generando charters con un
+  defecto ya corregido upstream por exactamente eso.
+- `status.sh` lo detecta como primer bloque de su auditoría.
+
+**Dos bugs de bulto encontrados de camino:**
+
+- `install.sh` copiaba con `cp -R src dest/` sobre un destino existente, lo que **anida la skill
+  dentro de sí misma** (`skills/foo/foo`) y la rompe en silencio. Ahora limpia el destino antes,
+  guardando copia de seguridad, con nombres que no colisionan aunque se instale dos veces en el
+  mismo segundo.
+- El manifest se escribía con un heredoc, así que **una regla de oro con comillas dobles producía
+  un JSON inválido** y dejaba el montaje con un manifiesto que ni `status` ni `upgrade` podrían
+  leer. Ahora se serializa con `json.dumps`.
+
+**El manifest guarda los parámetros del montaje** (`parametros`): regla de oro, comandos, fuentes y
+modelos. Sin ellos, `add-area` tendría que volver a preguntarlos o inventárselos, y el especialista
+nuevo nacería con un charter distinto del de sus hermanos. Los montajes de 1.0.0 siguen funcionando:
+`add-area` deduce lo que falta del charter de otro especialista y avisa de que lo ha hecho.
+
 ## 1.0.0 — 2026-07-31
 
 Primera versión. Fusiona el handoff del arquitecto persistente v3 —cuya metodología está probada
