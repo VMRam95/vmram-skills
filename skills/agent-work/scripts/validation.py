@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -63,7 +64,8 @@ def git_manifest(repositories):
     for name, info in repositories.items():
         root = Path(info['worktree']).resolve()
         def git(*args):
-            return subprocess.check_output(['git', '-C', str(root), *args], timeout=60)
+            return subprocess.check_output(['git', '-C', str(root), *args], timeout=60,
+                                           stderr=subprocess.PIPE)
         head = git('rev-parse', 'HEAD').decode().strip()
         branch = git('branch', '--show-current').decode().strip()
         patch = hashlib.sha256(git('diff', '--binary', 'HEAD'))
@@ -92,7 +94,18 @@ def git_manifest(repositories):
                 raise RuntimeError('Nested repository needs its own declared version')
             content.update(raw + b'\0' + mode + b'\0' + hashlib.sha256(data).digest())
         base = info.get('base')
-        base_sha = git('rev-parse', 'origin/' + base).decode().strip() if base else None
+        if 'base_sha' in info:
+            base_sha = info['base_sha']
+            if not isinstance(base_sha, str) or not re.fullmatch(r'(?:[0-9a-f]{40}|[0-9a-f]{64})', base_sha):
+                raise RuntimeError(f'Pinned base for {name} must be a complete commit SHA')
+            try:
+                resolved = git('rev-parse', '--verify', base_sha + '^{commit}').decode().strip()
+            except subprocess.CalledProcessError as exc:
+                raise RuntimeError(f'Pinned base for {name} is not an existing commit') from exc
+            if resolved != base_sha:
+                raise RuntimeError(f'Pinned base for {name} is not an exact commit SHA')
+        else:
+            base_sha = git('rev-parse', 'origin/' + base).decode().strip() if base else None
         aligned = subprocess.run(['git', '-C', str(root), 'merge-base', '--is-ancestor',
                                   base_sha, head], capture_output=True).returncode == 0 if base_sha else False
         manifest[name] = {'head': head, 'branch': branch, 'base': base, 'base_sha': base_sha,

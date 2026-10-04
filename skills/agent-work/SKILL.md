@@ -41,6 +41,11 @@ afterward review saved evidence and capture offline reports. More live checks ne
 a fresh generation of the same source; never bypass an inactive resource journal.
 Then run:
 
+The journal fixes each repository's base name and exact commit before startup.
+Later fetches by other agents may advance shared remote refs without changing that
+base. Reloads still verify HEAD, branch and source changes. A missing or changed
+declaration, or inconsistent historical evidence, fails before starting more work.
+
 ```sh
 python3 -B ~/.agents/skills/agent-work/scripts/agent_work.py validate --job JOB --wait 300
 python3 -B ~/.agents/skills/agent-work/scripts/agent_work.py deliver --job JOB --evidence /exact/workspace/artifacts/TICKET/delivery.json

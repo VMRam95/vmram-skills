@@ -62,7 +62,9 @@ class DeliveryTests(unittest.TestCase):
                        check=True, capture_output=True)
         head = subprocess.check_output(
             ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
-        repositories = {"fixture": {"worktree": str(root), "base": "main"}}
+        base_sha = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "origin/main"], text=True).strip()
+        repositories = {"fixture": {"worktree": str(root), "base": "main", "base_sha": base_sha}}
         job = {
             "root": str(root),
             "gate": {"passed": gate, "errors": [] if gate else ["skipped cases"]},
@@ -91,6 +93,26 @@ class DeliveryTests(unittest.TestCase):
     def test_matching_pr_local_version_and_real_mobile_png_pass(self):
         with tempfile.TemporaryDirectory() as temporary:
             job, manifest, pull, _ = self.case(Path(temporary).resolve())
+            with mock.patch.object(delivery, "github", side_effect=self.github_reads(pull)):
+                result = delivery.verify(job, manifest)
+            self.assertTrue(result["passed"], result["errors"])
+
+    def test_remote_base_advance_does_not_change_pinned_delivery_version(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            job, manifest, pull, root = self.case(parent)
+            peer = parent / "peer"
+            subprocess.run(["git", "clone", "--branch", "main", str(parent / "origin.git"), str(peer)],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(peer), "config", "user.name", "Peer Fixture"], check=True)
+            subprocess.run(["git", "-C", str(peer), "config", "user.email", "peer@example.invalid"], check=True)
+            (peer / "peer.txt").write_text("advance remote after validation\n")
+            subprocess.run(["git", "-C", str(peer), "add", "peer.txt"], check=True)
+            subprocess.run(["git", "-C", str(peer), "commit", "-m", "test: advance remote"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(peer), "push", "origin", "main"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "fetch", "origin"], check=True, capture_output=True)
             with mock.patch.object(delivery, "github", side_effect=self.github_reads(pull)):
                 result = delivery.verify(job, manifest)
             self.assertTrue(result["passed"], result["errors"])

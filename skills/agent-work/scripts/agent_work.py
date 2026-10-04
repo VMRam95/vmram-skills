@@ -88,6 +88,91 @@ class Flow:
             if record.get('status') != 'released':
                 raise UnfinishedPhaseError('A previous phase is still active; close this job before another operation')
 
+    def pin_repository_bases(self):
+        """Persist immutable repository bases before any stack hook uses them."""
+        job = self.job()
+        adapter = job.get('adapter', {})
+        repositories = adapter.get('repositories', {})
+        if not isinstance(repositories, dict):
+            raise RuntimeError('Adapter repositories must be a mapping')
+        if not repositories:
+            if (adapter.get('repository_base_pins') is not None
+                    or adapter.get('served_source_manifest') is not None
+                    or job.get('versions') is not None):
+                raise RuntimeError('Repository declarations disappeared after they were pinned')
+            return {}
+        def full_sha(value):
+            return isinstance(value,str) and len(value) in (40,64) and all(c in '0123456789abcdef' for c in value)
+        def historical(label, value):
+            if value is None:return None
+            if not isinstance(value,dict) or set(value)!=set(repositories):
+                raise RuntimeError(f'Invalid {label}')
+            result={}
+            for name, entry in value.items():
+                if (not isinstance(entry,dict) or not full_sha(entry.get('head'))
+                        or not full_sha(entry.get('base_sha'))
+                        or not isinstance(entry.get('branch'),str) or not entry['branch']
+                        or not isinstance(entry.get('base'),str) or not entry['base']
+                        or entry.get('base_is_ancestor') is not True
+                        or not isinstance(entry.get('wip_sha256'),str) or len(entry['wip_sha256'])!=64
+                        or any(c not in '0123456789abcdef' for c in entry['wip_sha256'])
+                        or not isinstance(entry.get('content_sha256'),str) or len(entry['content_sha256'])!=64
+                        or any(c not in '0123456789abcdef' for c in entry['content_sha256'])):
+                    raise RuntimeError(f'Invalid {label} for repository: {name}')
+                result[name]={'base':entry['base'],'base_sha':entry['base_sha']}
+            return result
+        served=adapter.get('served_source_manifest')
+        served_pairs=historical('served source manifest',served)
+        served_digest=adapter.get('served_source_sha256')
+        if served_digest is not None and (served is None or served_digest!=digest(served)):
+            raise RuntimeError('Served source manifest digest mismatch')
+        version_pairs=historical('tested repository versions',job.get('versions'))
+        if served_pairs is not None and version_pairs is not None and served_pairs!=version_pairs:
+            raise RuntimeError('Served and tested repository bases differ')
+
+        stored=adapter.get('repository_base_pins')
+        if stored is not None:
+            if (not isinstance(stored,dict) or set(stored)!=set(repositories)
+                    or any(not isinstance(pair,dict) or set(pair)!= {'base','base_sha'}
+                           or not isinstance(pair['base'],str) or not pair['base']
+                           or not full_sha(pair['base_sha']) for pair in stored.values())):
+                raise RuntimeError('Invalid durable repository base pins')
+            if ((served_pairs is not None and served_pairs!=stored)
+                    or (version_pairs is not None and version_pairs!=stored)):
+                raise RuntimeError('Historical repository bases differ from durable pins')
+            base_pins=stored
+        else:
+            launched=(job.get('state') not in ('registered','preparing','queued') or
+                      any(p.get('phase') in ('up','health','discover','test','command')
+                          for p in job.get('phases',[])))
+            base_pins=served_pairs or version_pairs
+            if base_pins is None and launched:
+                raise RuntimeError('Started job has no durable repository base evidence')
+
+        pinned={}
+        for name, raw in repositories.items():
+            if not isinstance(raw,dict) or not isinstance(raw.get('base'),str) or not raw['base']:
+                raise RuntimeError(f'Invalid repository declaration: {name}')
+            info=dict(raw)
+            if base_pins is not None:
+                pair=base_pins[name]
+                if info['base']!=pair['base'] or ('base_sha' in info and info['base_sha']!=pair['base_sha']):
+                    raise RuntimeError(f'Repository base changed after it was pinned: {name}')
+                info['base_sha']=pair['base_sha']
+            elif 'base_sha' not in info:
+                info['base_sha']=git_manifest({name:info})[name]['base_sha']
+            pinned[name]=info
+        manifest=git_manifest(pinned)
+        if base_pins is None:
+            base_pins={name:{'base':entry['base'],'base_sha':entry['base_sha']}
+                       for name,entry in manifest.items()}
+        latest=self.job().get('adapter',{})
+        if latest.get('repositories',{})!=repositories or latest.get('repository_base_pins')!=stored:
+            raise RuntimeError('Repository declarations changed while bases were being pinned')
+        if repositories!=pinned or stored!=base_pins:
+            self.state.update_adapter(self.identifier,repositories=pinned,repository_base_pins=base_pins)
+        return manifest
+
     def hook(self, phase, command=None, cwd=None, timeout_override=None):
         job = self.job()
         folder = self.state.path(self.identifier).parent
@@ -191,8 +276,10 @@ class Flow:
                         and job.get('allocation_realized') and not job.get('reservation_pending')
                         and health.get('state') == 'passed' and health.get('exit_code') == 0)
         if job['state'] in ('ready', 'validated', 'validation_failed') or resume_ready:
+            current = self.pin_repository_bases()
+            job = self.job()
             served = job['adapter'].get('served_source_manifest')
-            reloads = served is not None and served != git_manifest(job['adapter'].get('repositories', {}))
+            reloads = served is not None and served != current
             if reloads and not self.admit('up', wait):
                 return 75
             rc = self.hook('health')
@@ -208,6 +295,7 @@ class Flow:
             if self.hook('prepare'): return 1
             if not self.job()['adapter'].get('prepared'):
                 raise RuntimeError('Prepare hook did not record its resources')
+        self.pin_repository_bases()
         self.save(state='starting')
         if self.hook('up') or self.hook('health'): return 1
         self.save(state='ready',reservation_pending=False,allocation_realized=time.time()); return 0
@@ -359,6 +447,8 @@ def main():
                                     and health.get('state') == 'passed' and health.get('exit_code') == 0)
                     if job['state'] not in ('ready','validated') and not resume_ready:
                         raise RuntimeError('Start and verify the local stack before exec')
+                    flow.pin_repository_bases()
+                    job=state.read(job['id'])
                     rc=75
                     if flow.admit('test',args.wait):
                         try:
@@ -372,6 +462,8 @@ def main():
                 elif args.action=='deliver':
                     if not args.evidence: parser.error('deliver needs --evidence')
                     from delivery import verify
+                    flow.pin_repository_bases()
+                    job=state.read(job['id'])
                     delivery=verify(job,args.evidence)
                     job=state.read(job['id']);job['delivery']=delivery;state.save(job)
                     rc=0 if delivery['passed'] else 1

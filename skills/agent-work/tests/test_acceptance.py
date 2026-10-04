@@ -107,6 +107,19 @@ class FixtureLifecycleTests(unittest.TestCase):
         self.assertTrue(all(not agent_work.runtime.members(record["pid"]) for _ in [0]))
         return job
 
+    def advance_origin(self, parent: Path, root: Path, peer: Path, marker: str):
+        if not peer.exists():
+            subprocess.run(["git", "clone", "--branch", "main", str(parent / "origin.git"), str(peer)],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(peer), "config", "user.name", "Peer Fixture"], check=True)
+            subprocess.run(["git", "-C", str(peer), "config", "user.email", "peer@example.invalid"], check=True)
+        (peer / "peer.txt").write_text(marker + "\n")
+        subprocess.run(["git", "-C", str(peer), "add", "peer.txt"], check=True)
+        subprocess.run(["git", "-C", str(peer), "commit", "-m", f"test: {marker}"],
+                       check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(peer), "push", "origin", "main"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(root), "fetch", "origin"], check=True, capture_output=True)
+
     def cleanup_and_preserve(self, state: State, label: str, *owned_jobs):
         errors = []
         for job, owner in owned_jobs:
@@ -138,6 +151,192 @@ class FixtureLifecycleTests(unittest.TestCase):
                 self.assertTrue(all(Path(path).is_file() for path in closed["adapter"]["preserved_evidence"]))
             finally:
                 self.cleanup_and_preserve(state, "passing-cycle", (job, "passing-owner"))
+
+    def test_pinned_base_ignores_origin_advance_before_and_during_validation(self):
+        with run_workspace("pinned-origin-advance") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "pinned-origin-advance", "pinned-owner")
+                original_hook = flow.hook
+
+                def assert_pinned_before_hook(phase, command=None, cwd=None, timeout_override=None):
+                    if phase == "up":
+                        declared = state.read(job["id"])["adapter"]["repositories"]["fixture"]
+                        self.assertIn("base_sha", declared)
+                    return original_hook(phase, command, cwd, timeout_override)
+
+                with mock.patch.object(flow, "hook", side_effect=assert_pinned_before_hook), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                ready = state.read(job["id"])
+                served = agent_work.git_manifest(ready["adapter"]["repositories"])
+                pinned_sha = served["fixture"]["base_sha"]
+                legacy = {name: {key: value for key, value in info.items() if key != "base_sha"}
+                          for name, info in ready["adapter"]["repositories"].items()}
+                state.update_adapter(job["id"], repositories=legacy, repository_base_pins=None,
+                                     served_source_manifest=served)
+                peer = parent / "peer"
+                self.advance_origin(parent, Path(job["root"]), peer, "advance-before-validation")
+                up_count = sum(phase["phase"] == "up" for phase in ready["phases"])
+
+                def advance_during_test(phase, command=None, cwd=None, timeout_override=None):
+                    rc = original_hook(phase, command, cwd, timeout_override)
+                    if phase == "test":
+                        self.advance_origin(parent, Path(job["root"]), peer, "advance-during-validation")
+                    return rc
+
+                with mock.patch.object(flow, "hook", side_effect=advance_during_test), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.validate())
+                validated = state.read(job["id"])
+                self.assertTrue(validated["gate"]["passed"], validated["gate"]["errors"])
+                self.assertEqual(pinned_sha, validated["adapter"]["repositories"]["fixture"]["base_sha"])
+                self.assertEqual(pinned_sha, validated["versions"]["fixture"]["base_sha"])
+                self.assertEqual(up_count, sum(phase["phase"] == "up" for phase in validated["phases"]))
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "pinned-origin-advance", (job, "pinned-owner"))
+
+    def test_durable_pin_rejects_later_base_or_base_sha_replacement(self):
+        with run_workspace("durable-base-pin") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "durable-base-pin", "durable-pin-owner")
+                with mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                current = state.read(job["id"])
+                original = current["adapter"]["repositories"]
+                pins = current["adapter"]["repository_base_pins"]
+                self.assertEqual({"base": original["fixture"]["base"],
+                                  "base_sha": original["fixture"]["base_sha"]}, pins["fixture"])
+                phase_count = len(current["phases"])
+                for field, value in (("base", "replacement"), ("base_sha", "f" * 40)):
+                    with self.subTest(field=field):
+                        changed = json.loads(json.dumps(original))
+                        changed["fixture"][field] = value
+                        state.update_adapter(job["id"], repositories=changed)
+                        with self.assertRaisesRegex(RuntimeError, "changed after it was pinned"):
+                            flow.start()
+                        self.assertEqual(phase_count, len(state.read(job["id"])["phases"]))
+                        state.update_adapter(job["id"], repositories=original)
+                state.update_adapter(job["id"], repositories={})
+                with self.assertRaisesRegex(RuntimeError, "declarations disappeared"):
+                    flow.start()
+                self.assertEqual(phase_count, len(state.read(job["id"])["phases"]))
+                state.update_adapter(job["id"], repositories=original)
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "durable-base-pin", (job, "durable-pin-owner"))
+
+    def test_legacy_validated_job_recovers_pin_from_versions_not_live_origin(self):
+        with run_workspace("legacy-versions-pin") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "legacy-versions", "legacy-versions-owner")
+                with mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                ready = state.read(job["id"])
+                versions = agent_work.git_manifest(ready["adapter"]["repositories"])
+                original_sha = versions["fixture"]["base_sha"]
+                flow.save(versions=versions)
+                legacy = {name: {key: value for key, value in info.items() if key != "base_sha"}
+                          for name, info in ready["adapter"]["repositories"].items()}
+                state.update_adapter(job["id"], repositories=legacy, repository_base_pins=None,
+                                     served_source_manifest=None, served_source_sha256=None)
+                self.advance_origin(parent, Path(job["root"]), parent / "peer", "advance-after-legacy-run")
+                up_count = sum(phase["phase"] == "up" for phase in ready["phases"])
+                with mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                recovered = state.read(job["id"])
+                self.assertEqual(original_sha,
+                                 recovered["adapter"]["repository_base_pins"]["fixture"]["base_sha"])
+                self.assertEqual(original_sha,
+                                 recovered["adapter"]["repositories"]["fixture"]["base_sha"])
+                self.assertEqual(up_count, sum(phase["phase"] == "up" for phase in recovered["phases"]))
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "legacy-versions-pin",
+                                          (job, "legacy-versions-owner"))
+
+    def test_corrupt_legacy_served_manifest_or_digest_never_seeds_pin(self):
+        with run_workspace("invalid-served-manifest") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "invalid-served", "invalid-served-owner")
+                self.assertEqual(0, flow.hook("prepare"))
+                current = state.read(job["id"])
+                valid = agent_work.git_manifest(current["adapter"]["repositories"])
+                corruptions = []
+                for field, value in (("head", None), ("wip_sha256", "0" * 63),
+                                     ("base_is_ancestor", False)):
+                    candidate = json.loads(json.dumps(valid)); candidate["fixture"][field] = value
+                    corruptions.append((field, candidate, agent_work.digest(candidate)))
+                corruptions.append(("digest", valid, "0" * 64))
+                for label, candidate, checksum in corruptions:
+                    with self.subTest(label=label):
+                        state.update_adapter(job["id"], served_source_manifest=candidate,
+                                             served_source_sha256=checksum,
+                                             repository_base_pins=None)
+                        with self.assertRaisesRegex(RuntimeError, "served source|Served source"):
+                            flow.pin_repository_bases()
+                        adapter = state.read(job["id"])["adapter"]
+                        self.assertIsNone(adapter["repository_base_pins"])
+                        self.assertNotIn("base_sha", adapter["repositories"]["fixture"])
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "invalid-served-manifest",
+                                          (job, "invalid-served-owner"))
+
+    def test_real_source_change_during_validation_is_rejected(self):
+        with run_workspace("source-change-during-validation") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "source-change", "source-change-owner")
+                with mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                original_hook = flow.hook
+
+                def change_after_test(phase, command=None, cwd=None, timeout_override=None):
+                    rc = original_hook(phase, command, cwd, timeout_override)
+                    if phase == "test":
+                        (Path(job["root"]) / "tracked.txt").write_text("changed during validation\n")
+                    return rc
+
+                with mock.patch.object(flow, "hook", side_effect=change_after_test), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(1, flow.validate())
+                failed = state.read(job["id"])
+                self.assertFalse(failed["gate"]["passed"])
+                self.assertTrue(any("Repository version changed" in error for error in failed["gate"]["errors"]))
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "source-change-during-validation",
+                                          (job, "source-change-owner"))
+
+    def test_existing_non_ancestor_base_is_rejected_by_validation_gate(self):
+        with run_workspace("non-ancestor-base") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "non-ancestor", "non-ancestor-owner")
+                root = Path(job["root"])
+                tree = subprocess.check_output(
+                    ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], text=True).strip()
+                unrelated = subprocess.check_output(
+                    ["git", "-C", str(root), "commit-tree", tree], input="unrelated base\n", text=True).strip()
+                original_hook = flow.hook
+
+                def prepare_non_ancestor(phase, command=None, cwd=None, timeout_override=None):
+                    rc = original_hook(phase, command, cwd, timeout_override)
+                    if phase == "prepare":
+                        current = state.read(job["id"])
+                        repositories = current["adapter"]["repositories"]
+                        repositories["fixture"]["base_sha"] = unrelated
+                        state.update_adapter(job["id"], repositories=repositories)
+                    return rc
+
+                with mock.patch.object(flow, "hook", side_effect=prepare_non_ancestor), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(1, flow.validate())
+                failed = state.read(job["id"])
+                self.assertFalse(failed["gate"]["passed"])
+                self.assertIn("The declared remote base is not an ancestor", failed["gate"]["errors"])
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "non-ancestor-base", (job, "non-ancestor-owner"))
 
     def test_failure_closes_cleanly_and_retry_gets_new_generation(self):
         with run_workspace("failure-and-retry") as parent:

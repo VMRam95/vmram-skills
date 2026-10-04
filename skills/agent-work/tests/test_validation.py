@@ -7,9 +7,9 @@ import subprocess
 import sys
 import tempfile
 
-from support import clean_evidence, deep_copy
+from support import clean_evidence, deep_copy, init_git_fixture
 import agent_work
-from validation import validate_tests
+from validation import git_manifest, validate_tests
 
 
 class StrictCatalogueTests(unittest.TestCase):
@@ -91,6 +91,53 @@ class StrictCatalogueTests(unittest.TestCase):
             )
             self.assertNotEqual(0, result.returncode)
             self.assertIn("finite nonnegative", result.stderr)
+
+
+class GitManifestTests(unittest.TestCase):
+    def test_pinned_base_survives_remote_advance_but_rejects_invalid_sha(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root = init_git_fixture(parent)
+            base_sha = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "origin/main"], text=True).strip()
+            repositories = {"fixture": {"worktree": str(root), "base": "main", "base_sha": base_sha}}
+            before = git_manifest(repositories)
+
+            peer = parent / "peer"
+            subprocess.run(["git", "clone", "--branch", "main", str(parent / "origin.git"), str(peer)],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(peer), "config", "user.name", "Peer Fixture"], check=True)
+            subprocess.run(["git", "-C", str(peer), "config", "user.email", "peer@example.invalid"], check=True)
+            (peer / "peer.txt").write_text("remote advanced\n")
+            subprocess.run(["git", "-C", str(peer), "add", "peer.txt"], check=True)
+            subprocess.run(["git", "-C", str(peer), "commit", "-m", "test: advance remote"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(peer), "push", "origin", "main"],
+                           check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "fetch", "origin"], check=True, capture_output=True)
+
+            self.assertEqual(before, git_manifest(repositories))
+            self.assertNotEqual(base_sha, git_manifest({
+                "fixture": {"worktree": str(root), "base": "main"}
+            })["fixture"]["base_sha"])
+            for invalid in (base_sha[:12], "f" * len(base_sha)):
+                with self.subTest(invalid=invalid), self.assertRaisesRegex(RuntimeError, "Pinned base"):
+                    git_manifest({"fixture": {
+                        "worktree": str(root), "base": "main", "base_sha": invalid,
+                    }})
+
+    def test_existing_unrelated_commit_is_reported_as_non_ancestor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = init_git_fixture(Path(temporary).resolve())
+            tree = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], text=True).strip()
+            unrelated = subprocess.check_output(
+                ["git", "-C", str(root), "commit-tree", tree], input="unrelated base\n", text=True).strip()
+            manifest = git_manifest({"fixture": {
+                "worktree": str(root), "base": "main", "base_sha": unrelated,
+            }})
+            self.assertEqual(unrelated, manifest["fixture"]["base_sha"])
+            self.assertFalse(manifest["fixture"]["base_is_ancestor"])
 
 
 if __name__ == "__main__":
