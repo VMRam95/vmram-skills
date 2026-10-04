@@ -20,7 +20,8 @@ manager reservation, resources and frozen profile. Do not export its tokens into
 reports. Independent terminals need a stable `AGENT_LOCAL_OWNER`; CAS/Codex/Claude
 session IDs are recognized automatically. Changing model does not change ownership.
 
-A queued job returns exit 75 and has not opened project resources. Resume `start`
+A queued job returns exit 75. Initial admission opens no project resources;
+capacity queues for an existing ready stack retain its verified resources. Resume `start`
 with the same job, or use bounded `--wait`. Tasks can coexist while expensive
 stacks/tests wait for physically measured RAM, CPU and disk. No TTL, dead-owner
 reclamation, background polling or chat watchers are installed.

@@ -43,6 +43,8 @@ def compare(first,second):
     versions_changed = product_versions(first) != product_versions(second)
     if versions_changed:
         reasons.append('Different tested product versions')
+    if (first.get('adapter') or {}).get('toolchain') != (second.get('adapter') or {}).get('toolchain'):
+        reasons.append('Different runtime toolchain')
     for job in (first, second):
         revisions = {p['core_sha256'] for p in job.get('phases', []) if p.get('core_sha256')}
         if len(revisions) > 1:

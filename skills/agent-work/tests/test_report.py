@@ -52,6 +52,14 @@ class ReportTests(unittest.TestCase):
         self.assertTrue(result["versions_changed"])
         self.assertIn("Different tested product versions", result["reasons"])
 
+    def test_compare_rejects_different_runtime_toolchains(self):
+        first, second = completed('a' * 32), completed('b' * 32)
+        first['adapter'] = {'toolchain': {'node_version': 'v24.5.0'}}
+        second['adapter'] = {'toolchain': {'node_version': 'v24.6.0'}}
+        result = work_report.compare(first, second)
+        self.assertFalse(result['comparable'])
+        self.assertIn('Different runtime toolchain', result['reasons'])
+
     def test_different_lane_branches_preserve_comparable_product_and_base_identity(self):
         first, second = completed("a" * 32), completed("b" * 32)
         for job, branch in ((first, "agent-work/first"), (second, "agent-work/second")):
