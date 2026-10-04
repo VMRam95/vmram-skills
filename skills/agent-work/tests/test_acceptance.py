@@ -384,6 +384,37 @@ class FixtureLifecycleTests(unittest.TestCase):
             finally:
                 self.cleanup_and_preserve(state, "cli-exec-queue", (job, "cli-exec-queue-owner"))
 
+    def test_source_reload_waits_for_growth_capacity_before_health(self):
+        with run_workspace("source-reload-capacity") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "source-reload-capacity", "reload-owner")
+                with mock.patch.object(agent_work, 'capacity', side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                current = state.read(job['id'])
+                original = agent_work.git_manifest(current['adapter']['repositories'])
+                state.update_adapter(job['id'], served_source_manifest=original)
+                repo = Path(current['adapter']['repositories']['fixture']['worktree'])
+                (repo / 'reload-proof.txt').write_text('changed source')
+                before = state.read(job['id'])
+                sample = deterministic_capacity()
+                sample['system']['cpu_idle_percent'] = 0
+                with mock.patch.object(agent_work, 'capacity', return_value=sample):
+                    self.assertEqual(75, flow.start())
+                queued = state.read(job['id'])
+                self.assertEqual('queued', queued['state'])
+                self.assertEqual(len(before['phases']), len(queued['phases']))
+                with mock.patch.object(agent_work, 'capacity', side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                ready = state.read(job['id'])
+                self.assertEqual('ready', ready['state'])
+                self.assertEqual(['queue-up', 'health'], [p['phase'] for p in ready['phases'][-2:]])
+                self.assertEqual(job['profile_data']['budgets']['up'], ready['budget'])
+                self.assertFalse(ready['reservation_pending'])
+                self.assertFalse(ready['waiting_for_capacity'])
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "source-reload-capacity", (job, "reload-owner"))
+
     def test_cli_exec_keeps_reservation_when_phase_cleanup_is_denied(self):
         with run_workspace("cli-exec-cleanup-denied") as parent:
             state, _, job = self.new_flow(parent, "cli-exec-cleanup-denied", "cli-exec-denied-owner")

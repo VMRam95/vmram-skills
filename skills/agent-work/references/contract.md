@@ -12,6 +12,13 @@ and `adapter.repositories` with worktree/base per repo. A closed generation neve
 adopts retained WIP: its next generation must explicitly preserve/import the source.
 Managers validate stable owner plus reservation generation before each mutation.
 `up` provisions only that generation and `health` proves the application is ready.
+Adapters that reload edited sources publish `adapter.served_source_manifest`
+using the common `git_manifest` after checking the source before and after loading.
+When that manifest changes, the core admits the `up` growth budget before calling
+`health`; a queued reload preserves its stack and resumes the same generation.
+Health must seal the newly served version and preserve data. Source changes clear
+the previous validation/delivery gate; a normal unchanged health check needs no
+additional startup growth.
 
 `discover` saves adapter.catalog_evidence pointing at JSON with required_suites and
 catalog [{suite, id}]. IDs must be unique, deterministic and include project/mode

@@ -186,8 +186,22 @@ class Flow:
         job = self.job()
         if job['state'] == 'closed':
             raise RuntimeError('This generation is closed; start a new generation from its preserved source')
-        if job['state'] in ('ready', 'validated', 'validation_failed'):
-            return self.hook('health')
+        health = next((p for p in reversed(job['phases']) if p.get('phase') == 'health'), {})
+        resume_ready = (job['state'] == 'queued' and job['adapter'].get('prepared')
+                        and job.get('allocation_realized') and not job.get('reservation_pending')
+                        and health.get('state') == 'passed' and health.get('exit_code') == 0)
+        if job['state'] in ('ready', 'validated', 'validation_failed') or resume_ready:
+            served = job['adapter'].get('served_source_manifest')
+            reloads = served is not None and served != git_manifest(job['adapter'].get('repositories', {}))
+            if reloads and not self.admit('up', wait):
+                return 75
+            rc = self.hook('health')
+            if not rc:
+                self.save(state='ready' if reloads or resume_ready else job['state'],
+                          reservation_pending=False, allocation_realized=time.time())
+                if reloads:
+                    self.save(gate=None, delivery=None)
+            return rc
         if not self.admit('up',wait): return 75
         if not job['adapter'].get('prepared'):
             self.save(state='preparing')
