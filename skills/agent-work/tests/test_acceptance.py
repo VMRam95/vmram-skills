@@ -86,11 +86,11 @@ class FixtureLifecycleTests(unittest.TestCase):
             close_rc = flow.close()
         return start_rc, validate_rc, close_rc
 
-    def call_main(self, *argv):
+    def call_main(self, *argv, capacity_sample=deterministic_capacity):
         previous_signal = signal.getsignal(signal.SIGTERM)
         try:
             with mock.patch.object(sys, "argv", [str(agent_work.HERE / "agent_work.py"), *argv]), \
-                    mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    mock.patch.object(agent_work, "capacity", side_effect=capacity_sample):
                 return agent_work.main()
         finally:
             signal.signal(signal.SIGTERM, previous_signal)
@@ -355,6 +355,34 @@ class FixtureLifecycleTests(unittest.TestCase):
                 self.assertEqual(0, flow.close())
             finally:
                 self.cleanup_and_preserve(state, "cli-exec", (job, "cli-exec-owner"))
+
+    def test_cli_exec_resumes_capacity_queue_without_restarting_owned_stack(self):
+        with run_workspace("cli-exec-queue") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "cli-exec-queue", "cli-exec-queue-owner")
+                with mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                marker = parent / "executed"
+                argv = ("exec", "--job", job["id"], "--state-dir", str(state.root),
+                        "--", sys.executable, "-c", "from pathlib import Path; Path(__import__('sys').argv[1]).write_text('ran')", str(marker))
+                sample = deterministic_capacity()
+                sample['system']['cpu_idle_percent'] = 0
+                self.assertEqual(75, self.call_main(*argv, capacity_sample=lambda: sample))
+                self.assertFalse(marker.exists())
+                queued = state.read(job['id'])
+                self.assertEqual('queued', queued['state'])
+                self.assertTrue(queued['waiting_for_capacity'])
+                up_count = sum(p['phase'] == 'up' for p in queued['phases'])
+                with mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(0, self.call_main(*argv))
+                current = state.read(job['id'])
+                self.assertEqual('ran', marker.read_text())
+                self.assertEqual('ready', current['state'])
+                self.assertFalse(current['waiting_for_capacity'])
+                self.assertEqual(up_count, sum(p['phase'] == 'up' for p in current['phases']))
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "cli-exec-queue", (job, "cli-exec-queue-owner"))
 
     def test_cli_exec_keeps_reservation_when_phase_cleanup_is_denied(self):
         with run_workspace("cli-exec-cleanup-denied") as parent:

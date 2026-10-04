@@ -339,7 +339,12 @@ def main():
                         parser.error('exec requires argv after -- and a cwd inside its workspace')
                     if not math.isfinite(args.timeout) or args.timeout<=0:parser.error('Invalid exec timeout')
                     flow.require_released_phases()
-                    if job['state'] not in ('ready','validated'):raise RuntimeError('Start and verify the local stack before exec')
+                    health = next((p for p in reversed(job['phases']) if p.get('phase') == 'health'), {})
+                    resume_ready = (job['state'] == 'queued' and job['adapter'].get('prepared')
+                                    and job.get('allocation_realized') and not job.get('reservation_pending')
+                                    and health.get('state') == 'passed' and health.get('exit_code') == 0)
+                    if job['state'] not in ('ready','validated') and not resume_ready:
+                        raise RuntimeError('Start and verify the local stack before exec')
                     rc=75
                     if flow.admit('test',args.wait):
                         try:
@@ -348,7 +353,8 @@ def main():
                             flow.save(state='cleanup_pending')
                             raise
                         else:
-                            flow.save(reservation_pending=False,allocation_realized=time.time())
+                            flow.save(state=('validated' if (job.get('gate') or {}).get('passed') else 'ready'),
+                                      reservation_pending=False,allocation_realized=time.time())
                 elif args.action=='deliver':
                     if not args.evidence: parser.error('deliver needs --evidence')
                     from delivery import verify
