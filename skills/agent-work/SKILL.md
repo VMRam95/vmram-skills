@@ -20,11 +20,19 @@ manager reservation, resources and frozen profile. Do not export its tokens into
 reports. Independent terminals need a stable `AGENT_LOCAL_OWNER`; CAS/Codex/Claude
 session IDs are recognized automatically. Changing model does not change ownership.
 
+Wait for `start` to finish with exit 0 and state `ready` before editing a recorded
+worktree or running a probe. A tool's running `session_id` only means the CLI is
+still executing; it does not mean the stack is ready. Editing during `prepare`,
+`up` or initial `health` invalidates the startup source manifest and triggers a
+failed start with cleanup. Persist that failure rather than counting it as a pass.
+
 A queued job returns exit 75. Initial admission opens no project resources;
 capacity queues for an existing ready stack retain its verified resources. Resume `start`
 with the same job, or use bounded `--wait`. Tasks can coexist while expensive
 stacks/tests wait for physically measured RAM, CPU and disk. No TTL, dead-owner
 reclamation, background polling or chat watchers are installed.
+Only queued or active generations can resume; a `closed` generation needs a new
+job with the same stable session owner after its cleanup is verified.
 
 Work inside the recorded project worktrees. After implementation, use `start --job`
 to verify the served revision and `exec` for the real local flow and mobile captures

@@ -43,6 +43,17 @@ class ReportTests(unittest.TestCase):
         self.assertIn("PASS", document)
         self.assertIn("2.00s", document)
 
+    def test_report_keeps_failed_timings_without_aggregating_incompatible_runs(self):
+        passed, failed = completed("a" * 32, 100), completed("b" * 32, 1)
+        failed["gate"]["passed"] = False
+        failed["phases"][0].update(state="failed", exit_code=1)
+        document = work_report.render([passed, failed])
+        self.assertIn("100.00s", document)
+        self.assertIn("1.00s", document)
+        self.assertIn("PENDING / FAIL", document)
+        self.assertNotIn("Median closed run", document)
+        self.assertFalse(work_report.compare(passed, failed)["comparable"])
+
     def test_compare_rejects_different_tested_product_versions(self):
         first = completed("d" * 32)
         second = completed("e" * 32)
