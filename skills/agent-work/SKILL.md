@@ -26,7 +26,12 @@ with the same job, or use bounded `--wait`. Tasks can coexist while expensive
 stacks/tests wait for physically measured RAM, CPU and disk. No TTL, dead-owner
 reclamation, background polling or chat watchers are installed.
 
-Work inside the recorded project worktrees. Implement the task, then run:
+Work inside the recorded project worktrees. After implementation, use `start --job`
+to verify the served revision and `exec` for the real local flow and mobile captures
+before `validate`. Some project suites stop their database in their final cleanup:
+afterward review saved evidence and capture offline reports. More live checks need
+a fresh generation of the same source; never bypass an inactive resource journal.
+Then run:
 
 ```sh
 python3 -B ~/.agents/skills/agent-work/scripts/agent_work.py validate --job JOB --wait 300
