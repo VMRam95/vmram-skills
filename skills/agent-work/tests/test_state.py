@@ -10,7 +10,7 @@ import unittest
 from unittest import mock
 
 from support import deterministic_capacity, preserve_run, profile, run_workspace, set_owner
-from work_state import State
+from work_state import State, owner
 
 
 def admission_worker(state_dir: str, root: str, profile_path: str, profile_data: dict,
@@ -47,6 +47,19 @@ def port_claim_worker(state_dir: str, raw_owner: str, identifier: str, start):
 
 
 class StateTests(unittest.TestCase):
+    def test_normalized_identity_keeps_ownership_during_recovery(self):
+        for key in ('TMF_LANE_OWNER_ID', 'AGENT_LOCAL_OWNER', 'CODEX_THREAD_ID'):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as temporary, \
+                    mock.patch.dict(os.environ, {key: 'stable-session'}, clear=True):
+                root = Path(temporary).resolve()
+                profile_path, profile_data = profile(root)
+                state = State(root / 'state')
+                job = state.create('owner-recovery', root, profile_path, profile_data)
+                normalized = job['owner']
+                os.environ['AGENT_LOCAL_OWNER'] = normalized
+                self.assertEqual(normalized, owner())
+                self.assertEqual(job['id'], state.read(job['id'])['id'])
+
     def test_closed_generation_cannot_readmit_and_active_index_ignores_history(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary).resolve()

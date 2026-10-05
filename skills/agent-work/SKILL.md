@@ -78,6 +78,17 @@ produce a passing gate. The test gate does not alone prove product delivery: ope
 its PR against the declared fresh base, exercise its real local UI/API flow, check
 responsive behavior and save/inspect screenshots under `artifacts/TICKET/`. Follow
 the project's approval and Kanban gates. Never merge or complete by elapsed time.
+For a separate acceptance lane that tests an existing PR's exact commit, its PR
+manifest may explicitly name `head_ref`. The live PR must match that published
+ref and the tested commit/base. The tested local Git manifest remains unchanged;
+omitting `head_ref` requires the local lane's branch as before.
+
+A project may return 75 from `prepare` or `up` before starting more resources.
+This keeps the same job queued with zero pending RAM/CPU growth. `--wait` makes
+fresh admission measurements before retrying that startup phase; it never retries
+product tests. Resume the same ID after the wait expires, and close it on cancel.
+Other failures retain their real exits and cleanup requirements.
+
 
 A worker closes its own job before reporting and includes job ID, tested versions,
 case/suite counts, logs, PR/ticket, real screenshot links, cleanup and pending work.

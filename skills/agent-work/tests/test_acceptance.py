@@ -152,6 +152,137 @@ class FixtureLifecycleTests(unittest.TestCase):
             finally:
                 self.cleanup_and_preserve(state, "passing-cycle", (job, "passing-owner"))
 
+    def test_prepare_tempfail_queues_without_resources_and_resumes_same_job(self):
+        with run_workspace("prepare-project-capacity") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "prepare-project-capacity", "prepare-capacity-owner")
+                state.update_adapter(job["id"], capacity_wait_reason="fixture project slots full")
+                original_hook = flow.hook
+                attempts = []
+
+                def capacity_once(phase, command=None, cwd=None, timeout_override=None):
+                    if phase == "prepare" and not attempts:
+                        attempts.append(phase)
+                        return original_hook(phase, [sys.executable, "-c", "raise SystemExit(75)"],
+                                             cwd, timeout_override)
+                    return original_hook(phase, command, cwd, timeout_override)
+
+                with mock.patch.object(flow, "hook", side_effect=capacity_once), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(75, flow.start(0))
+                    queued = state.read(job["id"])
+                    self.assertEqual("queued", queued["state"])
+                    self.assertTrue(queued["waiting_for_capacity"])
+                    self.assertEqual("fixture project slots full", queued["wait_reason"])
+                    self.assertEqual({"ram_gb": 0, "cpu_cores": 0}, queued["budget"])
+                    self.assertFalse(queued["reservation_pending"])
+                    self.assertIsInstance(queued["allocation_realized"], float)
+                    self.assertFalse(queued["adapter"].get("prepared", False))
+                    self.assertFalse((state.path(job["id"]).parent / "fixture").exists())
+                    prepare = [item for item in queued["phases"] if item["phase"] == "prepare"]
+                    self.assertEqual([(75, "queued")],
+                                     [(item["exit_code"], item["state"]) for item in prepare])
+                    self.assertEqual(job["id"], flow.identifier)
+                    self.assertEqual(0, flow.start(0))
+                self.assertEqual(job["id"], state.read(job["id"])["id"])
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "prepare-project-capacity",
+                                          (job, "prepare-capacity-owner"))
+
+    def test_up_tempfail_preserves_prepared_state_and_resumes_same_job(self):
+        with run_workspace("up-project-capacity") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "up-project-capacity", "up-capacity-owner")
+                original_hook = flow.hook
+                attempts = []
+
+                def capacity_once(phase, command=None, cwd=None, timeout_override=None):
+                    if phase == "up" and not attempts:
+                        attempts.append(phase)
+                        return original_hook(phase, [sys.executable, "-c", "raise SystemExit(75)"],
+                                             cwd, timeout_override)
+                    return original_hook(phase, command, cwd, timeout_override)
+
+                with mock.patch.object(flow, "hook", side_effect=capacity_once), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(75, flow.start(0))
+                    queued = state.read(job["id"])
+                    self.assertEqual("queued", queued["state"])
+                    self.assertTrue(queued["adapter"]["prepared"])
+                    self.assertEqual({"ram_gb": 0, "cpu_cores": 0}, queued["budget"])
+                    self.assertFalse(queued["reservation_pending"])
+                    self.assertFalse(Path(queued["adapter"]["server_record"]).exists())
+                    self.assertEqual(1, sum(item["phase"] == "prepare" for item in queued["phases"]))
+                    self.assertEqual((75, "queued"),
+                                     [(item["exit_code"], item["state"]) for item in queued["phases"]
+                                      if item["phase"] == "up"][-1])
+                    self.assertEqual(0, flow.start(0))
+                ready = state.read(job["id"])
+                self.assertEqual("ready", ready["state"])
+                self.assertEqual(1, sum(item["phase"] == "prepare" for item in ready["phases"]))
+                self.assertEqual(2, sum(item["phase"] == "up" for item in ready["phases"]))
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "up-project-capacity", (job, "up-capacity-owner"))
+
+    def test_finite_wait_readmits_and_recovers_project_capacity_in_same_start(self):
+        with run_workspace("wait-project-capacity") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "wait-project-capacity", "wait-capacity-owner")
+                original_hook = flow.hook
+                attempts = []
+
+                def capacity_once(phase, command=None, cwd=None, timeout_override=None):
+                    if phase == "prepare" and not attempts:
+                        attempts.append(phase)
+                        return original_hook(phase, [sys.executable, "-c", "raise SystemExit(75)"],
+                                             cwd, timeout_override)
+                    return original_hook(phase, command, cwd, timeout_override)
+
+                with mock.patch.object(flow, "hook", side_effect=capacity_once), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity), \
+                        mock.patch.object(agent_work.time, "sleep", return_value=None):
+                    self.assertEqual(0, flow.start(2))
+                ready = state.read(job["id"])
+                prepare = [item for item in ready["phases"] if item["phase"] == "prepare"]
+                self.assertEqual([(75, "queued"), (0, "passed")],
+                                 [(item["exit_code"], item["state"]) for item in prepare])
+                self.assertGreaterEqual(sum(item["phase"] == "queue-up" for item in ready["phases"]), 2)
+                self.assertFalse(ready["waiting_for_capacity"])
+                self.assertFalse(ready["reservation_pending"])
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "wait-project-capacity", (job, "wait-capacity-owner"))
+
+    def test_non_tempfail_prepare_error_is_not_retried_or_converted(self):
+        with run_workspace("prepare-project-error") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "prepare-project-error", "prepare-error-owner")
+                original_hook = flow.hook
+                attempts = []
+
+                def fail_once(phase, command=None, cwd=None, timeout_override=None):
+                    if phase == "prepare":
+                        attempts.append(phase)
+                        return original_hook(phase, [sys.executable, "-c", "raise SystemExit(1)"],
+                                             cwd, timeout_override)
+                    return original_hook(phase, command, cwd, timeout_override)
+
+                with mock.patch.object(flow, "hook", side_effect=fail_once), \
+                        mock.patch.object(agent_work, "capacity", side_effect=deterministic_capacity):
+                    self.assertEqual(1, flow.start(10))
+                current = state.read(job["id"])
+                self.assertEqual(["prepare"], attempts)
+                self.assertEqual([(1, "failed")],
+                                 [(item["exit_code"], item["state"]) for item in current["phases"]
+                                  if item["phase"] == "prepare"])
+                self.assertNotEqual("queued", current["state"])
+                self.assertFalse(current["waiting_for_capacity"])
+            finally:
+                self.cleanup_and_preserve(state, "prepare-project-error",
+                                          (job, "prepare-error-owner"))
+
     def test_pinned_base_ignores_origin_advance_before_and_during_validation(self):
         with run_workspace("pinned-origin-advance") as parent:
             try:

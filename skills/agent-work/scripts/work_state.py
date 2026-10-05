@@ -22,7 +22,7 @@ def owner():
         if value:
             if '\n' in value or '\r' in value:
                 raise RuntimeError('Invalid stable session identity')
-            if key in ('AGENT_LOCAL_OWNER','TMF_LANE_OWNER_ID') and value.startswith(('agent_local_owner:','codeagentswarm_terminal_id:','codex_thread_id:','codex_session_id:','claude_code_session_id:','term_session_id:')):
+            if key in ('AGENT_LOCAL_OWNER','TMF_LANE_OWNER_ID') and value.startswith(('agent_local_owner:','tmf_lane_owner_id:','codeagentswarm_terminal_id:','codex_thread_id:','codex_session_id:','claude_code_session_id:','term_session_id:')):
                 return value
             return key.lower() + ':' + value
     raise RuntimeError('Set AGENT_LOCAL_OWNER to a stable identity for this independent session')

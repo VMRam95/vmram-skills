@@ -266,7 +266,30 @@ class Flow:
                 return False
             time.sleep(min(5,wait-(time.monotonic()-start)))
 
+    def start_phase(self, phase, deadline):
+        while True:
+            rc = self.hook(phase)
+            if rc != 75:
+                return rc
+            current = self.job()
+            for entry in reversed(current['phases']):
+                if entry.get('phase') == phase and entry.get('exit_code') == 75:
+                    entry['state'] = 'queued'
+                    break
+            reason = current.get('adapter',{}).get('capacity_wait_reason') or 'project capacity'
+            current.update(state='queued',waiting_for_capacity=True,wait_reason=reason,
+                           budget={'ram_gb':0,'cpu_cores':0},reservation_pending=False,
+                           allocation_realized=time.time())
+            self.state.save(current)
+            remaining = deadline-time.monotonic()
+            if remaining <= 0:
+                return 75
+            time.sleep(min(5,remaining))
+            if not self.admit('up',max(0,deadline-time.monotonic())):
+                return 75
+
     def start(self, wait=0):
+        deadline = time.monotonic()+wait
         self.require_released_phases()
         job = self.job()
         if job['state'] == 'closed':
@@ -280,7 +303,7 @@ class Flow:
             job = self.job()
             served = job['adapter'].get('served_source_manifest')
             reloads = served is not None and served != current
-            if reloads and not self.admit('up', wait):
+            if reloads and not self.admit('up', max(0,deadline-time.monotonic())):
                 return 75
             rc = self.hook('health')
             if not rc:
@@ -289,15 +312,18 @@ class Flow:
                 if reloads:
                     self.save(gate=None, delivery=None)
             return rc
-        if not self.admit('up',wait): return 75
+        if not self.admit('up',max(0,deadline-time.monotonic())): return 75
         if not job['adapter'].get('prepared'):
             self.save(state='preparing')
-            if self.hook('prepare'): return 1
+            rc = self.start_phase('prepare',deadline)
+            if rc: return 75 if rc==75 else 1
             if not self.job()['adapter'].get('prepared'):
                 raise RuntimeError('Prepare hook did not record its resources')
         self.pin_repository_bases()
         self.save(state='starting')
-        if self.hook('up') or self.hook('health'): return 1
+        rc = self.start_phase('up',deadline)
+        if rc: return 75 if rc==75 else 1
+        if self.hook('health'): return 1
         self.save(state='ready',reservation_pending=False,allocation_realized=time.time()); return 0
 
     def validate(self, wait=0):

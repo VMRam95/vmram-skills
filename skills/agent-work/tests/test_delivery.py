@@ -97,6 +97,29 @@ class DeliveryTests(unittest.TestCase):
                 result = delivery.verify(job, manifest)
             self.assertTrue(result["passed"], result["errors"])
 
+    def test_explicit_published_ref_can_certify_the_same_commit_from_an_acceptance_lane(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            job, manifest, pull, _ = self.case(Path(temporary).resolve())
+            # Preserve the already-tested local manifest, including its branch.
+            original = json.loads(json.dumps(job['versions']))
+            pull['head']['ref'] = 'feature/existing-pr'
+            with mock.patch.object(delivery, 'github', side_effect=self.github_reads(pull)):
+                self.assertFalse(delivery.verify(job, manifest)['passed'])
+                for ref, expected in [('feature/existing-pr', True), ('another-pr', False), ('', False), (None, False)]:
+                    evidence = json.loads(manifest.read_text())
+                    evidence['prs'][0]['head_ref'] = ref
+                    # Test evidence is normally outside product Git. Keep this
+                    # fixture's tracked manifest constant by using a second file.
+                    external = Path(temporary) / 'explicit-delivery.json'
+                    external.write_text(json.dumps(evidence))
+                    result = delivery.verify(job, external)
+                    self.assertEqual(expected, result['passed'], result['errors'])
+                self.assertEqual(original, job['versions'])
+                evidence['prs'][0]['head_ref'] = pull['head']['ref']
+                external.write_text(json.dumps(evidence))
+                pull['head']['sha'] = '0' * 40
+                self.assertFalse(delivery.verify(job, external)['passed'])
+
     def test_remote_base_advance_does_not_change_pinned_delivery_version(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary).resolve()

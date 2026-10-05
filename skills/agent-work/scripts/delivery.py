@@ -46,8 +46,12 @@ def verify(job, manifest_path):
         if not login: continue
         pr = json.loads(github('api', f'repos/{repo}/pulls/{number}'))
         version = current[name]
+        expected_ref = item.get('head_ref', version['branch'])
+        if not isinstance(expected_ref, str) or not expected_ref:
+            errors.append(f'Invalid published PR branch: {name}')
+            continue
         if (pr['state'] != 'open' or pr['base']['ref'] != version['base'] or
-            pr['head']['sha'] != version['head'] or pr['head']['ref'] != version['branch']):
+            pr['head']['sha'] != version['head'] or pr['head']['ref'] != expected_ref):
             errors.append(f'PR head/base/state mismatch: {name}')
         if pr['base']['repo']['full_name'].lower() != repo.lower():
             errors.append(f'PR repository mismatch: {name}')
