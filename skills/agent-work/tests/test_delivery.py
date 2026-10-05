@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import binascii
 import hashlib
+import os
 import json
 from pathlib import Path
 import struct
@@ -96,6 +97,16 @@ class DeliveryTests(unittest.TestCase):
             with mock.patch.object(delivery, "github", side_effect=self.github_reads(pull)):
                 result = delivery.verify(job, manifest)
             self.assertTrue(result["passed"], result["errors"])
+
+    def test_each_person_can_deliver_with_their_own_github_account(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            job, manifest, pull, _ = self.case(Path(temporary).resolve())
+            job['profile_data']['github_login'] = 'profile-owner'
+            with mock.patch.object(delivery, "github", side_effect=self.github_reads(pull)):
+                with self.assertRaisesRegex(RuntimeError, 'Active GitHub account differs'):
+                    delivery.verify(job, manifest)
+                with mock.patch.dict(os.environ, {'AGENT_WORK_GITHUB_LOGIN': 'fixture-user'}):
+                    self.assertTrue(delivery.verify(job, manifest)['passed'])
 
     def test_explicit_published_ref_can_certify_the_same_commit_from_an_acceptance_lane(self):
         with tempfile.TemporaryDirectory() as temporary:

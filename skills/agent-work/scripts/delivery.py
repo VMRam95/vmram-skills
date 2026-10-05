@@ -1,5 +1,6 @@
 """Verify PR heads and inspected real screenshot files against a full local run."""
 import hashlib
+import os
 import subprocess as sp
 import json
 from pathlib import Path
@@ -27,7 +28,8 @@ def verify(job, manifest_path):
     if current != job.get('versions'):
         errors.append('PR source differs from the exact version tested locally')
     evidence = json.loads(Path(manifest_path).read_text())
-    login = job['profile_data'].get('github_login')
+    # Each person delivers with their own account; the profile keeps the default.
+    login = os.environ.get('AGENT_WORK_GITHUB_LOGIN') or job['profile_data'].get('github_login')
     if not login:
         errors.append('Profile must declare the authorized GitHub login')
     else:
