@@ -348,6 +348,8 @@ class StateTests(unittest.TestCase):
                 again = state.read(job["id"]); again["waiting_for_capacity"] = False; state.save(again)
                 admitted, current = state.admit(job["id"], {"ram_gb": 6, "cpu_cores": 1}, sample)
                 self.assertTrue(admitted, current["wait_reason"])  # 12.5 - 6 >= 6
+                host.write_text('{"budgets": {"test": {"ram_gb": 9}, "bad": {"ram_gb": 1}, "up": {"ram_gb": -1}}}')
+                self.assertEqual({"test": {"ram_gb": 9}}, __import__("work_state").host_budgets())
                 host.write_text('{"cpu_overcommit": 2}')
                 self.assertEqual(2, __import__("work_state").host_cpu_overcommit())
                 host.write_text('{"cpu_overcommit": 99}')

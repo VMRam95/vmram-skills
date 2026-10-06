@@ -45,6 +45,24 @@ def host_reserve(path=None):
             and not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0}
 
 
+def host_budgets(path=None):
+    """`~/.config/agent-work/host.json` {"budgets": {"test": {"ram_gb": 9}}} per phase."""
+    path = Path(path or os.environ.get('AGENT_WORK_HOST_CONFIG',
+                                       Path.home() / '.config/agent-work/host.json'))
+    try:
+        values = json.loads(path.read_text()).get('budgets', {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+    result = {}
+    for phase, budget in (values.items() if isinstance(values, dict) else []):
+        if phase in ('up', 'test') and isinstance(budget, dict):
+            clean = {k: v for k, v in budget.items() if k in ('ram_gb', 'cpu_cores')
+                     and not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v > 0}
+            if clean:
+                result[phase] = clean
+    return result
+
+
 def host_cpu_overcommit(path=None):
     """`~/.config/agent-work/host.json` {"cpu_overcommit": 2} counts idle CPU twice."""
     path = Path(path or os.environ.get('AGENT_WORK_HOST_CONFIG',
