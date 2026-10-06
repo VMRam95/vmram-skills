@@ -34,8 +34,10 @@ its job lock for its whole life; when the CLI dies the kernel drops it, and that
 job stops charging its pending reservation and loses its queue turn (it shows as
 `abandoned` and still needs `close`). The queue is FIFO with bounded backfill: a
 later task that fits may pass a head that does not, until the head has waited
-`backfill_seconds` (profile, default 900). No TTL, background polling or chat
-watchers are installed.
+`backfill_seconds` (profile, default 900). The physical reserve kept free belongs
+to the machine: `~/.config/agent-work/host.json` = `{"reserve": {"ram_gb": 6}}`
+overrides the profile's on every admission sample (remove it to go back). No TTL,
+background polling or chat watchers are installed.
 Only queued or active generations can resume; a `closed` generation needs a new
 job with the same stable session owner after its cleanup is verified.
 

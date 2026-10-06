@@ -28,6 +28,23 @@ def owner():
     raise RuntimeError('Set AGENT_LOCAL_OWNER to a stable identity for this independent session')
 
 
+def host_reserve(path=None):
+    """Host-level physical reserve, read on every admission sample.
+
+    The machine, not each project profile, decides how much headroom it keeps;
+    `~/.config/agent-work/host.json` = {"reserve": {"ram_gb": 6}} applies at once
+    to every new admission sample. Missing or invalid values keep the profile's.
+    """
+    path = Path(path or os.environ.get('AGENT_WORK_HOST_CONFIG',
+                                       Path.home() / '.config/agent-work/host.json'))
+    try:
+        values = json.loads(path.read_text()).get('reserve', {})
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return {k: v for k, v in values.items() if k in ('ram_gb', 'cpu_cores', 'disk_gb')
+            and not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0}
+
+
 class State:
     def __init__(self, root=None):
         self.root = Path(root or os.environ.get('AGENT_WORK_STATE_DIR',
@@ -236,7 +253,8 @@ class State:
             for field in ('memory_effective_available_gb','logical_cpus','cpu_idle_percent'):
                 if not isinstance(system.get(field),(int,float)) or not math.isfinite(system[field]) or system[field]<0:
                     raise RuntimeError('Physical measurement is inconclusive')
-            reserve = job['profile_data'].get('reserve', {'ram_gb':8, 'cpu_cores':2, 'disk_gb':5})
+            reserve = dict(job['profile_data'].get('reserve', {'ram_gb':8, 'cpu_cores':2, 'disk_gb':5}))
+            reserve.update(host_reserve())
             available = system['memory_effective_available_gb'] - reserve['ram_gb']
             cpu = system['logical_cpus']*system['cpu_idle_percent']/100 - reserve['cpu_cores']
             pending = [j for j in live if j.get('reservation_pending',True) or

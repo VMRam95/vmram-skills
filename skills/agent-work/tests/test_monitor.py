@@ -74,10 +74,11 @@ class ManagedResourcesTests(unittest.TestCase):
                 201: {"rss_kb": 262144, "cpu": 1.0},
             }
             members = {101: [101, 102], 201: [201], 301: [301]}
-            with patch.object(managed_resources.runtime, "members",
-                              side_effect=lambda pid: members.get(pid, [])), \
-                 patch.object(managed_resources.runtime, "verified",
-                              side_effect=lambda record: record["identity"] != "foreign-id"):
+            with patch.object(managed_resources.ProcessTable, "__init__", lambda self: None), \
+                 patch.object(managed_resources.ProcessTable, "members",
+                              lambda self, pid: members.get(pid, [])), \
+                 patch.object(managed_resources.ProcessTable, "verified",
+                              lambda self, record: record["identity"] != "foreign-id"):
                 result = managed_resources.snapshot(processes, root)
             self.assertEqual(1, result["active_jobs"])
             self.assertEqual(0, result["queued_jobs"])
@@ -167,6 +168,20 @@ class CapacityTests(unittest.TestCase):
         self.assertIn("Crecimiento reservado: 6.0 GB · 2.0 CPU", text)
         self.assertIn("tmf/CAS4958", text)
 
+
+
+
+class ProcessTableTests(unittest.TestCase):
+    def test_real_table_matches_runtime_for_this_process_group(self):
+        import os
+        import managed_resources
+        table = managed_resources.ProcessTable()
+        group = os.getpgrp()
+        self.assertIn(os.getpid(), table.members(group))
+        self.assertFalse(table.queries & set(table.members(group)))
+        self.assertEqual(managed_resources.runtime.process_start(os.getpid()), table.rows[os.getpid()][2])
+        self.assertFalse(table.verified({"pid": os.getpid(), "start": table.rows[os.getpid()][2],
+                                         "identity": "not-a-supervisor"}))
 
 if __name__ == "__main__":
     unittest.main()
