@@ -25,7 +25,7 @@ class UnfinishedPhaseError(RuntimeError):
 def capacity():
     # The same physical sampler is used by the CLI and menu bar integration.
     import mac_agent_capacity as sampler
-    args = argparse.Namespace(agent_budget_gb=4, reserve_gb=8, agent_cpu_cores=1.5, cpu_reserve_cores=2)
+    args = argparse.Namespace(agent_budget_gb=2.5, reserve_gb=8, agent_cpu_cores=1.5, cpu_reserve_cores=2)
     sample = sampler.snapshot(args)
     if 'observed_epoch' not in sample:raise RuntimeError('Physical sampler must record its actual observation time')
     return sample
