@@ -319,7 +319,8 @@ class State:
                 reasons.append('memory')
             if cpu < cpu_claimed + budget['cpu_cores']:
                 reasons.append('CPU')
-            if system.get('swapout_delta', 0) or snapshot['capacity'].get('io_contention'):
+            pressure = system.get('swap_pressure', bool(system.get('swapout_delta', 0)))
+            if pressure or snapshot['capacity'].get('io_contention'):
                 reasons.append('memory pressure or verified I/O contention')
             free_gb = os.statvfs(job['root']).f_bavail*os.statvfs(job['root']).f_frsize/(1024**3)
             if free_gb < reserve.get('disk_gb',5):

@@ -104,6 +104,14 @@ def count_thread_states():
         return None, None
 
 
+# A 1 s window swings by ±15 % of idle CPU on a loaded Mac; 3 s is stable.
+CPU_WINDOW_SECONDS = 3
+# One swapout in the window is noise under compression; sustained writes are not.
+SWAP_PRESSURE_PAGES = 1024
+# Measured agent sessions use 1.3–1.5 GB; the budget is still 1.5 x their median.
+AGENT_BUDGET_FLOOR_GB = 2.5
+
+
 def compute_capacity(
     total_gb,
     free_pct,
@@ -132,7 +140,7 @@ def compute_capacity(
         math.floor((idle_cores - args.cpu_reserve_cores - pending_cpu_cores)
                    / args.agent_cpu_cores),
     )
-    if swapout_delta > 0:
+    if swapout_delta > SWAP_PRESSURE_PAGES:
         physical_memory_slots = memory_slots = 0
     # La carga media a 1 min en macOS cuenta hilos en cola (incluido trabajo en
     # segundo plano QoS: Defender, Spotlight) y puede superar los núcleos con la
@@ -222,7 +230,7 @@ def snapshot(args):
 
     platform_pids = all_app_pids - agent_pids
     platform = [processes[pid] for pid in platform_pids if pid in processes]
-    top = run("top", "-l", "2", "-n", "0", "-s", "1")
+    top = run("top", "-l", "2", "-n", "0", "-s", str(CPU_WINDOW_SECONDS))
     cpu = last_match(
         r"CPU usage:\s*([\d.]+)% user,\s*([\d.]+)% sys,\s*([\d.]+)% idle",
         top,
@@ -280,6 +288,7 @@ def snapshot(args):
             "cpu_idle_percent": idle_pct,
             "load_average": [float(item) for item in load] if load else None,
             "swapout_delta": swapout_delta,
+            "swap_pressure": swapout_delta > SWAP_PRESSURE_PAGES,
             "runnable_threads": runnable_threads,
             "uninterruptible_threads": uninterruptible_threads,
         },
@@ -351,13 +360,17 @@ def self_test():
     assert io["limiting_resource"] == "I/O (esperas ininterrumpidas)"
     assert io["load_pressure"] == "saturación I/O"
 
-    # Agotamiento real de memoria: swapouts recientes → memoria en 0.
+    # Agotamiento real de memoria: escritura sostenida a swap → memoria en 0.
     mem = compute_capacity(
-        36, 81, 47, [3] * 6, args, swapout_delta=4, load1=88,
+        36, 81, 47, [3] * 6, args, swapout_delta=4096, load1=88,
         uninterruptible_threads=0,
     )
     assert mem["can_start_another"] is False
     assert mem["limiting_resource"] == "memoria"
+    # Un swapout suelto bajo compresión es ruido, no presión.
+    noise = compute_capacity(36, 81, 47, [3] * 6, args, swapout_delta=4, load1=88,
+                             uninterruptible_threads=0)
+    assert noise["memory_slots"] > 0
 
     # Medición inconclusa: sin dato de esperas U no se veta a ciegas.
     unknown = compute_capacity(
@@ -383,7 +396,7 @@ def self_test():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent-budget-gb", type=float, default=4)
+    parser.add_argument("--agent-budget-gb", type=float, default=AGENT_BUDGET_FLOOR_GB)
     parser.add_argument("--reserve-gb", type=float, default=8)
     parser.add_argument("--agent-cpu-cores", type=float, default=1.5)
     parser.add_argument("--cpu-reserve-cores", type=float, default=2)

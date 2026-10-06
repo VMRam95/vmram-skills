@@ -58,7 +58,7 @@ def notify(title, text):
 
 def main():
     args = argparse.Namespace(
-        agent_budget_gb=4, reserve_gb=8, agent_cpu_cores=1.5, cpu_reserve_cores=2
+        agent_budget_gb=2.5, reserve_gb=8, agent_cpu_cores=1.5, cpu_reserve_cores=2
     )
     try:
         data = cap.snapshot(args)
