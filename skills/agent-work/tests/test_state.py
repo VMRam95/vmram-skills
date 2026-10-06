@@ -284,8 +284,14 @@ class StateTests(unittest.TestCase):
             alive(stack, state, live, queued)
             set_owner("audit-queued")
             current = state.read(queued["id"]); current["waiting_for_capacity"] = True; state.save(current)
+            set_owner("audit-dead")
+            current = state.read(dead["id"]); current["state"] = "starting"; state.save(current)
+            set_owner("audit-idle")
+            idle = state.create("audit-idle", root, profile_path, profile_data)
+            current = state.read(idle["id"]); current["state"] = "ready"; state.save(current)
             status = {row["id"]: row["status"] for row in work_audit.jobs(state)}
-            self.assertEqual({live["id"]: "active", queued["id"]: "queued", dead["id"]: "abandoned"}, status)
+            self.assertEqual({live["id"]: "active", queued["id"]: "queued", dead["id"]: "abandoned",
+                              idle["id"]: "idle"}, status)
 
     def test_running_phase_is_charged_only_its_unreached_growth(self):
         with tempfile.TemporaryDirectory() as temporary:

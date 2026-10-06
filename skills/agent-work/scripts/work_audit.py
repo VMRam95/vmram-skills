@@ -13,6 +13,8 @@ import sys
 from process_runtime import atomic_json
 from work_state import TERMINAL_STATES
 
+MIDWAY = {'registered', 'preparing', 'starting', 'testing', 'running', 'closing'}
+
 
 def jobs(state):
     rows = []
@@ -20,9 +22,12 @@ def jobs(state):
         if job['state'] in TERMINAL_STATES:
             continue
         alive = state.holder_alive(job['id'])
+        waiting = bool(job.get('waiting_for_capacity'))
+        # Between commands a ready stack has no CLI: that is idle, not abandoned.
+        midway = waiting or job.get('reservation_pending') or job['state'] in MIDWAY
         rows.append({'id': job['id'], 'task': job['task'], 'owner': job['owner'], 'state': job['state'],
-                     'status': ('abandoned' if not alive else
-                                'queued' if job.get('waiting_for_capacity') else 'active'),
+                     'status': ('queued' if alive and waiting else 'active' if alive else
+                                'abandoned' if midway else 'idle'),
                      'budget': job['budget'], 'reservation_pending': bool(job.get('reservation_pending')),
                      'wait_reason': job.get('wait_reason', ''), 'created': job['created']})
     return rows
@@ -67,6 +72,7 @@ def command(state, args, load_profile):
     rows = jobs(state)
     report = {'jobs': rows, 'resources': resources, 'summary': {
         'active': sum(r['status'] == 'active' for r in rows),
+        'idle': sum(r['status'] == 'idle' for r in rows),
         'queued': sum(r['status'] == 'queued' for r in rows),
         'abandoned': [r['id'] for r in rows if r['status'] == 'abandoned'],
         'unexplained_resources': sum(1 for r in resources if not r.get('retained')),
