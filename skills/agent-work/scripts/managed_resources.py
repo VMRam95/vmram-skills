@@ -1,6 +1,7 @@
 """Bounded read-only attribution from the host agent-work journal."""
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -9,6 +10,50 @@ import process_runtime as runtime
 
 
 TERMINAL_STATES = {"closed", "cancelled"}
+
+
+class ProcessTable:
+    """One host process table reused for every record of a sample.
+
+    Same checks as process_runtime.members/verified (process group, exact start,
+    own group excluded, supervisor identity in its argv), but two ps calls per
+    sample instead of three per record: under load the per-record queries took
+    longer than the 30 s admission freshness window.
+    """
+
+    def __init__(self):
+        rc, output, first = runtime.ps_query(['-Ao', 'pid=,pgid=,stat=,lstart='])
+        if rc:
+            raise subprocess.CalledProcessError(rc, 'ps', output)
+        self.rows = {}
+        for line in output.splitlines():
+            parts = line.split(None, 3)
+            if len(parts) == 4:
+                self.rows[int(parts[0])] = (int(parts[1]), parts[2], parts[3].strip())
+        rc, output, second = runtime.ps_query(['-Aww', '-o', 'pid=,args='])
+        if rc:
+            raise subprocess.CalledProcessError(rc, 'ps', output)
+        self.args = {}
+        for line in output.splitlines():
+            parts = line.strip().split(None, 1)
+            if len(parts) == 2:
+                self.args[int(parts[0])] = parts[1]
+        self.queries = {first, second}
+
+    def members(self, pgid):
+        return [pid for pid, (group, stat, _) in self.rows.items()
+                if group == pgid and pid not in self.queries and not stat.startswith('Z')]
+
+    def verified(self, record):
+        pid = record.get('pid', 0)
+        if not isinstance(pid, int) or pid <= 1 or pid == os.getpid() or not record.get('start'):
+            return False
+        row = self.rows.get(pid)
+        if not row or row[2] != record['start'] or row[0] != pid or pid == os.getpgrp():
+            return False
+        paths = {str(Path(runtime.__file__).resolve()),
+                 str(Path.home() / '.codeagentswarm/sandbox/agent-local-work/scripts/process_runtime.py')}
+        return any(f'{path} supervise {record["identity"]} ' in self.args.get(pid, '') for path in paths)
 
 
 def empty(note=None, errors=0):
@@ -66,7 +111,7 @@ def read_record(raw_path):
     return record
 
 
-def inspect_job(job, processes):
+def inspect_job(job, processes, table=None):
     unknown = 0
     pids = set()
     seen = set()
@@ -84,8 +129,11 @@ def inspect_job(job, processes):
                 unknown += 1
                 continue
             pid = record.get("pid")
-            members = runtime.members(pid) if isinstance(pid, int) and pid > 1 else []
-            if members and runtime.verified(record):
+            if table is None:
+                unknown += 1
+                continue
+            members = table.members(pid) if isinstance(pid, int) and pid > 1 else []
+            if members and table.verified(record):
                 pids.update(members)
             elif members:
                 unknown += 1
@@ -140,6 +188,10 @@ def snapshot(processes=None, state_root=None):
     except (OSError,ValueError,json.JSONDecodeError):
         return empty("Host agent-work journal could not be listed; physical sampling is still valid.", errors=1)
     jobs = []
+    try:
+        table = ProcessTable()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        table = None  # every live record then counts as unverified, never as absent
     journal_errors = 0
     for path in paths:
         try:
@@ -152,7 +204,7 @@ def snapshot(processes=None, state_root=None):
                 raise ValueError("invalid job identity")
             if job.get("state") in TERMINAL_STATES:
                 continue
-            jobs.append(inspect_job(job, processes))
+            jobs.append(inspect_job(job, processes, table))
         except (OSError, ValueError, KeyError, json.JSONDecodeError, RuntimeError, TypeError):
             journal_errors += 1
     pending = [job for job in jobs if job["pending_growth"]]

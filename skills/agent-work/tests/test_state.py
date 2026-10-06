@@ -326,6 +326,31 @@ class StateTests(unittest.TestCase):
             self.assertFalse(admitted)
             self.assertIn("memory", current["wait_reason"])
 
+    def test_host_reserve_overrides_the_profile_on_each_sample(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root = parent / "root"
+            root.mkdir()
+            profile_path, profile_data = profile(root)
+            profile_data["reserve"] = {"ram_gb": 8, "cpu_cores": 0, "disk_gb": 0}
+            host = parent / "host.json"
+            state = State(parent / "state")
+            stack = self.enterContext(contextlib.ExitStack())
+            set_owner("host-reserve")
+            job = state.create("host-reserve", root, profile_path, profile_data)
+            alive(stack, state, job)
+            sample = deterministic_capacity()
+            sample["system"]["memory_effective_available_gb"] = 12.5
+            with mock.patch.dict(os.environ, {"AGENT_WORK_HOST_CONFIG": str(host)}):
+                admitted, current = state.admit(job["id"], {"ram_gb": 6, "cpu_cores": 1}, sample)
+                self.assertFalse(admitted)  # 12.5 - 8 < 6 with the profile reserve
+                host.write_text('{"reserve": {"ram_gb": 6}}')
+                again = state.read(job["id"]); again["waiting_for_capacity"] = False; state.save(again)
+                admitted, current = state.admit(job["id"], {"ram_gb": 6, "cpu_cores": 1}, sample)
+                self.assertTrue(admitted, current["wait_reason"])  # 12.5 - 6 >= 6
+                host.write_text('{"reserve": {"ram_gb": "x"}}')
+                self.assertEqual({}, __import__("work_state").host_reserve())
+
     def test_owner_and_generation_prevent_neighbor_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary).resolve()
