@@ -12,7 +12,7 @@ import time
 
 import process_runtime as runtime
 from validation import digest, git_manifest, validate_tests, package_version
-from work_state import State, owner
+from work_state import State, owner, host_budgets
 
 HERE = Path(__file__).resolve().parent
 CORE_SHA256 = package_version()
@@ -255,7 +255,9 @@ class Flow:
         self.in_admission = True  # stays set if the wait is interrupted
         while True:
             attempts += 1
-            admitted, current = self.state.admit(self.identifier,job['profile_data']['budgets'][phase],capacity())
+            # The host may resize a phase budget (host.json "budgets"), read every sample.
+            budget = dict(job['profile_data']['budgets'][phase]); budget.update(host_budgets().get(phase, {}))
+            admitted, current = self.state.admit(self.identifier,budget,capacity())
             if admitted:
                 current['phases'].append({'phase':'queue-'+phase,'started':time.time()-(time.monotonic()-start),
                     'finished':time.time(),'seconds':round(time.monotonic()-start,4),'exit_code':0,
