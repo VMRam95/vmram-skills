@@ -22,6 +22,9 @@ if str(SCRIPTS) not in sys.path:
 
 from validation import digest  # noqa: E402
 
+# Tests never read the host's real ~/.config/agent-work/host.json.
+os.environ["AGENT_WORK_HOST_CONFIG"] = str(Path(tempfile.gettempdir()) / "agent-work-tests-no-host.json")
+
 
 def clean_evidence() -> dict:
     catalog = [

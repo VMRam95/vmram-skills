@@ -61,6 +61,7 @@ class Flow:
     def __init__(self, state, identifier):
         self.state, self.identifier = state, identifier
         self.recovering = False
+        self.in_admission = False
 
     def job(self):
         data = self.state.read(self.identifier)
@@ -251,6 +252,7 @@ class Flow:
 
     def admit(self, phase, wait):
         start = time.monotonic(); job = self.job(); attempts = 0
+        self.in_admission = True  # stays set if the wait is interrupted
         while True:
             attempts += 1
             admitted, current = self.state.admit(self.identifier,job['profile_data']['budgets'][phase],capacity())
@@ -259,10 +261,12 @@ class Flow:
                     'finished':time.time(),'seconds':round(time.monotonic()-start,4),'exit_code':0,
                     'state':'passed','samples':attempts})
                 self.state.save(current)
+                self.in_admission = False
                 return True
             print(f"[{job['task']}] queued: {current['wait_reason']}",flush=True)
             self.save(state='queued')
             if time.monotonic()-start >= wait:
+                self.in_admission = False
                 return False
             time.sleep(min(5,wait-(time.monotonic()-start)))
 
@@ -517,7 +521,14 @@ def main():
                 if args.action in ('start','validate') and rc not in (0,75):
                     if flow.close(): rc=1
         except BaseException as exc:
-            if args.action in ('start','run','validate') and not isinstance(exc,UnfinishedPhaseError):
+            # Interrupting only the wait for capacity must not tear down a prepared
+            # stack: the job stays queued and resumes with the same ID.
+            waiting=(isinstance(exc,KeyboardInterrupt) and args.action in ('start','validate')
+                     and flow.in_admission and state.read(job['id'])['adapter'].get('prepared'))
+            if waiting:
+                print(f"[{job['task']}] interrupted while queued; stack kept, resume with --job {job['id']}",
+                      file=sys.stderr)
+            elif args.action in ('start','run','validate') and not isinstance(exc,UnfinishedPhaseError):
                 try:flow.close()
                 except BaseException as cleanup:print(f'Cleanup pending: {type(cleanup).__name__}: {cleanup}',file=sys.stderr)
             raise
