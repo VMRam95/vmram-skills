@@ -45,6 +45,19 @@ def host_reserve(path=None):
             and not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0}
 
 
+def host_cpu_overcommit(path=None):
+    """`~/.config/agent-work/host.json` {"cpu_overcommit": 2} counts idle CPU twice."""
+    path = Path(path or os.environ.get('AGENT_WORK_HOST_CONFIG',
+                                       Path.home() / '.config/agent-work/host.json'))
+    try:
+        value = json.loads(path.read_text()).get('cpu_overcommit', 1)
+    except (OSError, ValueError, AttributeError):
+        return 1
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return 1
+    return min(max(value, 1), 4)
+
+
 class State:
     def __init__(self, root=None):
         self.root = Path(root or os.environ.get('AGENT_WORK_STATE_DIR',
@@ -256,7 +269,10 @@ class State:
             reserve = dict(job['profile_data'].get('reserve', {'ram_gb':8, 'cpu_cores':2, 'disk_gb':5}))
             reserve.update(host_reserve())
             available = system['memory_effective_available_gb'] - reserve['ram_gb']
-            cpu = system['logical_cpus']*system['cpu_idle_percent']/100 - reserve['cpu_cores']
+            # CPU contention slows phases down but does not break them (memory does):
+            # a host may count its idle cores more than once.
+            cpu = (system['logical_cpus']*system['cpu_idle_percent']/100*host_cpu_overcommit()
+                   - reserve['cpu_cores'])
             pending = [j for j in live if j.get('reservation_pending',True) or
                        snapshot.get('observed_epoch',0) < j.get('allocation_realized',float('inf'))]
             # A pending phase is charged only the growth it has not reached yet:
