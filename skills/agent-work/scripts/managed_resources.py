@@ -100,6 +100,7 @@ def inspect_job(job, processes):
         unknown += 1
         ram = cpu = 0
     return {
+        "id": str(job.get("id") or "")[:32],
         "task": str(job.get("task") or "")[:120],
         "project": str(job.get("project") or "")[:120],
         "state": str(job.get("state") or "unknown")[:40],

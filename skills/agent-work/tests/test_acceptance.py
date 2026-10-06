@@ -38,6 +38,10 @@ def benchmark_worker(state_dir: str, job_id: str, raw_owner: str, audit_path: st
     output.put(("ready", job_id))
     start.wait(20)
     result = {"job_id": job_id, "start": None, "validate": None, "close": None, "error": None}
+    # Like main(), hold the job lock for the whole operation: admission treats an
+    # unheld lock as a dead CLI whose reservation no longer counts.
+    lock = state.locked("job-" + job_id, blocking=False)
+    lock.__enter__()
     try:
         with mock.patch.object(agent_work, "capacity", side_effect=lambda: two_service_capacity(audit_path)):
             result["start"] = flow.start(120)
@@ -53,6 +57,7 @@ def benchmark_worker(state_dir: str, job_id: str, raw_owner: str, audit_path: st
             result["close"] = flow.close()
         except BaseException as cleanup:
             result["error"] += f"; cleanup={type(cleanup).__name__}: {cleanup}"
+    lock.__exit__(None, None, None)
     output.put(("result", result))
 
 
