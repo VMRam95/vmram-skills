@@ -29,8 +29,13 @@ failed start with cleanup. Persist that failure rather than counting it as a pas
 A queued job returns exit 75. Initial admission opens no project resources;
 capacity queues for an existing ready stack retain its verified resources. Resume `start`
 with the same job, or use bounded `--wait`. Tasks can coexist while expensive
-stacks/tests wait for physically measured RAM, CPU and disk. No TTL, dead-owner
-reclamation, background polling or chat watchers are installed.
+stacks/tests wait for physically measured RAM, CPU and disk. Every operation holds
+its job lock for its whole life; when the CLI dies the kernel drops it, and that
+job stops charging its pending reservation and loses its queue turn (it shows as
+`abandoned` and still needs `close`). The queue is FIFO with bounded backfill: a
+later task that fits may pass a head that does not, until the head has waited
+`backfill_seconds` (profile, default 900). No TTL, background polling or chat
+watchers are installed.
 Only queued or active generations can resume; a `closed` generation needs a new
 job with the same stable session owner after its cleanup is verified.
 
@@ -68,8 +73,21 @@ python3 -B ~/.agents/skills/agent-work/scripts/agent_work.py exec --job JOB \
 ```
 
 `exec` records its real exit and drains only its registered group. It requires a
-ready stack and measured test capacity; it does not replace the full `validate`
-gate. After an interrupted phase, resume with `close` before starting more work.
+ready stack and reserves the `test` budget; pass `--budget up` for light commands
+(psql, curl, a capture) so they do not wait behind full suites. It warns when the
+source changed since the last `start`; reload with `start --job` before commands
+that use the running stack. It does not replace the full `validate` gate. After an
+interrupted phase, resume with `close` before starting more work.
+
+`audit` is read-only: jobs as active/queued/abandoned with their reservations, plus
+the profile's project resources (worktrees, containers, volumes) by owner and job,
+and the recorded reason when one is kept. `close` runs the same audit for its job
+and stays `cleanup_pending` if anything of it remains without a reason:
+
+```sh
+python3 -B ~/.agents/skills/agent-work/scripts/agent_work.py audit \
+  --profile ~/.agents/skills/PROJECT-agent-work/profile.json --root /exact/workspace
+```
 
 Full validation requires the inventory discovered **before** execution, all required
 suites, every case passed once, actual zero exit codes, zero skips/pending/errors,

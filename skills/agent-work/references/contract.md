@@ -6,6 +6,12 @@ cpu_cores, disk_gb), and optional positive timeouts per hook. Each hook is an ar
 array, never a shell string. Placeholders: python, root, job, profile_dir, phase,
 task. Hooks are trusted project tooling, not untrusted task text.
 
+Optional: `backfill_seconds` (queue bound, default 900) and `audit`, an argv with
+placeholders python, profile_dir and root that prints a JSON list of project
+resources: `{kind, name, job, owner, retained, detail}`. `job` is the agent-work
+job ID or null; `retained` is the recorded reason a resource is kept on purpose
+(e.g. uncommitted work with its backup path) or null. It must be read-only.
+
 Preparation invokes the canonical project manager, fetches the declared remote
 base before a new branch, journals resources immediately and saves `adapter.prepared`
 and `adapter.repositories` with worktree/base per repo. A closed generation never

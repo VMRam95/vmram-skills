@@ -401,6 +401,13 @@ class Flow:
         if any(results) or not self.job()['adapter'].get('cleanup_verified'):
             self.save(state='cleanup_pending',cleanup_errors=problems)
             return 1
+        # Verified hooks prove the manager's own checks; the project audit proves
+        # that nothing of this job survives elsewhere without a recorded reason.
+        import work_audit
+        remaining = work_audit.leftovers(self.job())
+        if remaining:
+            self.save(state='cleanup_pending',cleanup_errors=[f"{r['kind']} {r['name']} remains" for r in remaining])
+            return 1
         self.state.release(self.identifier,verified=True)
         return 0
 
@@ -416,13 +423,15 @@ def main():
         rc=subprocess.run(command).returncode
         runtime.atomic_json(result,{'exit_code':rc});return rc
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=('start','validate','deliver','close','run','status','report','compare','exec'))
+    parser.add_argument('action',choices=('start','validate','deliver','close','run','status','report','compare','exec','audit'))
     parser.add_argument('--profile',type=Path);parser.add_argument('--root',type=Path)
     parser.add_argument('--task');parser.add_argument('--job');parser.add_argument('--other')
     parser.add_argument('--state-dir',type=Path);parser.add_argument('--wait',type=float,default=0)
     parser.add_argument('--output',type=Path)
     parser.add_argument('--evidence',type=Path)
     parser.add_argument('--cwd',type=Path);parser.add_argument('--timeout',type=float,default=1200)
+    parser.add_argument('--budget',choices=('up','test'),default='test',
+                        help='exec reservation: test (default, heavy suites) or up (light auxiliary commands)')
     arguments=sys.argv[1:]
     separator=arguments.index('--') if '--' in arguments else len(arguments)
     args=parser.parse_args(arguments[:separator]);args.command=arguments[separator+1:]
@@ -432,6 +441,9 @@ def main():
         parser.error('--wait must be a finite nonnegative duration')
     if args.action=='status':
         print(json.dumps([summary(j) for j in state.all()],indent=2));return 0
+    if args.action=='audit':
+        import work_audit
+        return work_audit.command(state,args,load_profile)
     if args.action in ('report','compare'):
         import work_report
         return work_report.command(state,args)
@@ -473,10 +485,17 @@ def main():
                                     and health.get('state') == 'passed' and health.get('exit_code') == 0)
                     if job['state'] not in ('ready','validated') and not resume_ready:
                         raise RuntimeError('Start and verify the local stack before exec')
-                    flow.pin_repository_bases()
+                    current_source=flow.pin_repository_bases()
                     job=state.read(job['id'])
+                    served=job['adapter'].get('served_source_manifest')
+                    if served is not None and served!=current_source:
+                        # Unit tests or git on WIP are fine; anything using the stack is not.
+                        print(f"[{job['task']}] warning: source changed since the stack was loaded; "
+                              f"run `agent-work start --job {job['id']}` to reload and reseal before "
+                              "commands that use the running stack",file=sys.stderr,flush=True)
                     rc=75
-                    if flow.admit('test',args.wait):
+                    if flow.admit(args.budget,args.wait):
+                        flow.save(state='running')
                         try:
                             rc=flow.hook('command',command,cwd,args.timeout)
                         except BaseException:

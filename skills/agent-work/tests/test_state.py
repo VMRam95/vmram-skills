@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import multiprocessing
 import json
 import os
@@ -44,6 +45,22 @@ def port_claim_worker(state_dir: str, raw_owner: str, identifier: str, start):
     os.environ["AGENT_LOCAL_OWNER"] = raw_owner
     start.wait(10)
     State(Path(state_dir)).claim_ports(identifier, [43124])
+
+
+def alive(stack, state, *jobs):
+    """Hold each job lock as its CLI operation would for the whole operation."""
+    for job in jobs:
+        stack.enter_context(state.locked('job-' + job['id'], blocking=False))
+
+
+def dead_holder_worker(state_dir: str, raw_owner: str, identifier: str, ready):
+    os.environ["AGENT_LOCAL_OWNER"] = raw_owner
+    state = State(Path(state_dir))
+    with state.locked('job-' + identifier, blocking=False):
+        admitted, _ = state.admit(identifier, {"ram_gb": 6, "cpu_cores": 2}, deterministic_capacity())
+        ready.put(admitted)
+        ready.close(); ready.join_thread()
+        os._exit(9)  # killed between admission and resource realization
 
 
 class StateTests(unittest.TestCase):
@@ -150,12 +167,15 @@ class StateTests(unittest.TestCase):
             root = parent / "root"
             root.mkdir()
             profile_path, profile_data = profile(root)
+            profile_data["backfill_seconds"] = 0
             state = State(parent / "state")
+            stack = self.enterContext(contextlib.ExitStack())
             set_owner("fifo-first")
             first = state.create("first", root, profile_path, profile_data)
             time.sleep(0.01)
             set_owner("fifo-second")
             second = state.create("second", root, profile_path, profile_data)
+            alive(stack, state, first, second)
             scarce = deterministic_capacity()
             scarce["system"]["memory_effective_available_gb"] = 0
             set_owner("fifo-first")
@@ -169,6 +189,136 @@ class StateTests(unittest.TestCase):
             self.assertTrue(state.admit(first["id"], {"ram_gb": 0.01, "cpu_cores": 0.01}, deterministic_capacity())[0])
             set_owner("fifo-second")
             self.assertTrue(state.admit(second["id"], {"ram_gb": 0.01, "cpu_cores": 0.01}, deterministic_capacity())[0])
+
+    def test_dead_holder_neither_charges_nor_blocks_the_queue(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root = parent / "root"
+            root.mkdir()
+            profile_path, profile_data = profile(root)
+            profile_data["backfill_seconds"] = 0
+            state_dir = parent / "state"
+            state = State(state_dir)
+            stack = self.enterContext(contextlib.ExitStack())
+            set_owner("dead-holder")
+            orphan = state.create("orphan", root, profile_path, profile_data)
+            time.sleep(0.01)
+            set_owner("dead-waiter")
+            waiter = state.create("dead-waiter", root, profile_path, profile_data)
+            time.sleep(0.01)
+            set_owner("live-neighbor")
+            neighbor = state.create("neighbor", root, profile_path, profile_data)
+            alive(stack, state, neighbor)
+            context = multiprocessing.get_context("spawn")
+            ready = context.Queue()
+            killed = context.Process(target=dead_holder_worker,
+                                     args=(str(state_dir), "dead-holder", orphan["id"], ready))
+            killed.start(); killed.join(15)
+            self.assertTrue(ready.get(timeout=5))
+            self.assertEqual(9, killed.exitcode)
+            # A second dead CLI left a queued turn behind (start --wait expired).
+            set_owner("dead-waiter")
+            with state.locked('job-' + waiter['id'], blocking=False):
+                scarce = deterministic_capacity()
+                scarce["system"]["memory_effective_available_gb"] = 0
+                self.assertFalse(state.admit(waiter["id"], {"ram_gb": 1, "cpu_cores": 1}, scarce)[0])
+            self.assertFalse(state.holder_alive(orphan["id"]))
+            self.assertTrue(state.holder_alive(neighbor["id"]))
+            tight = deterministic_capacity()
+            tight["system"]["memory_effective_available_gb"] = 6.5
+            set_owner("live-neighbor")
+            admitted, current = state.admit(neighbor["id"], {"ram_gb": 6, "cpu_cores": 2}, tight)
+            self.assertTrue(admitted, current["wait_reason"])
+            sample = current["admission_samples"][-1]
+            self.assertEqual(0, sample["pending_ram_gb"])
+            self.assertEqual(sorted([orphan["id"], waiter["id"]]), sorted(sample["abandoned_jobs"]))
+
+    def test_bounded_backfill_lets_a_fitting_task_pass_then_restores_fifo(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root = parent / "root"
+            root.mkdir()
+            profile_path, profile_data = profile(root)
+            profile_data["backfill_seconds"] = 60
+            state = State(parent / "state")
+            stack = self.enterContext(contextlib.ExitStack())
+            set_owner("big-head")
+            head = state.create("big-head", root, profile_path, profile_data)
+            time.sleep(0.01)
+            set_owner("small-later")
+            small = state.create("small-later", root, profile_path, profile_data)
+            alive(stack, state, head, small)
+            room = deterministic_capacity()
+            room["system"]["memory_effective_available_gb"] = 7
+            set_owner("big-head")
+            admitted, current = state.admit(head["id"], {"ram_gb": 11, "cpu_cores": 1}, room)
+            self.assertFalse(admitted)
+            self.assertEqual("memory", current["wait_reason"])
+            set_owner("small-later")
+            admitted, current = state.admit(small["id"], {"ram_gb": 6, "cpu_cores": 1}, room)
+            self.assertTrue(admitted, current["wait_reason"])
+            # Once the head has waited past the bound, later tasks queue behind it.
+            set_owner("big-head")
+            aged = state.read(head["id"]); aged["queued_since"] = time.time() - 61; state.save(aged)
+            set_owner("small-later")
+            again = state.read(small["id"]); again.update(waiting_for_capacity=False); state.save(again)
+            admitted, current = state.admit(small["id"], {"ram_gb": 1, "cpu_cores": 1}, deterministic_capacity())
+            self.assertFalse(admitted)
+            self.assertIn("earlier queued task", current["wait_reason"])
+
+    def test_audit_reports_live_queued_and_abandoned_jobs(self):
+        import work_audit
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root = parent / "root"
+            root.mkdir()
+            profile_path, profile_data = profile(root)
+            state = State(parent / "state")
+            stack = self.enterContext(contextlib.ExitStack())
+            set_owner("audit-live")
+            live = state.create("audit-live", root, profile_path, profile_data)
+            set_owner("audit-queued")
+            queued = state.create("audit-queued", root, profile_path, profile_data)
+            set_owner("audit-dead")
+            dead = state.create("audit-dead", root, profile_path, profile_data)
+            alive(stack, state, live, queued)
+            set_owner("audit-queued")
+            current = state.read(queued["id"]); current["waiting_for_capacity"] = True; state.save(current)
+            status = {row["id"]: row["status"] for row in work_audit.jobs(state)}
+            self.assertEqual({live["id"]: "active", queued["id"]: "queued", dead["id"]: "abandoned"}, status)
+
+    def test_running_phase_is_charged_only_its_unreached_growth(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root = parent / "root"
+            root.mkdir()
+            profile_path, profile_data = profile(root)
+            state = State(parent / "state")
+            stack = self.enterContext(contextlib.ExitStack())
+            set_owner("running-full")
+            running = state.create("running-full", root, profile_path, profile_data)
+            set_owner("next-full")
+            following = state.create("next-full", root, profile_path, profile_data)
+            alive(stack, state, running, following)
+            set_owner("running-full")
+            self.assertTrue(state.admit(running["id"], {"ram_gb": 11, "cpu_cores": 6},
+                                        deterministic_capacity())[0])
+            # 16 GB free: the running FULL already uses 6 GB (inside the sample), so
+            # only its remaining 5 GB of growth is reserved and 11 GB still fit.
+            sample = deterministic_capacity()
+            sample["system"].update(memory_effective_available_gb=16, logical_cpus=14, cpu_idle_percent=100)
+            sample["managed_resources"] = {"jobs": [{"id": running["id"], "rss_gb": 6, "cpu_percent": 300}]}
+            set_owner("next-full")
+            admitted, current = state.admit(following["id"], {"ram_gb": 11, "cpu_cores": 6}, sample)
+            self.assertTrue(admitted, current["wait_reason"])
+            self.assertEqual(5, current["admission_samples"][-1]["pending_ram_gb"])
+            self.assertEqual(3, current["admission_samples"][-1]["pending_cpu_cores"])
+            # Without a measurement the whole budget stays reserved (no double grant).
+            again = state.read(following["id"]); again.update(reservation_pending=False); state.save(again)
+            sample.pop("managed_resources")
+            admitted, current = state.admit(following["id"], {"ram_gb": 11, "cpu_cores": 6}, sample)
+            self.assertFalse(admitted)
+            self.assertIn("memory", current["wait_reason"])
 
     def test_owner_and_generation_prevent_neighbor_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -195,8 +345,10 @@ class StateTests(unittest.TestCase):
             root.mkdir()
             profile_path, profile_data = profile(root)
             state = State(parent / "state")
+            stack = self.enterContext(contextlib.ExitStack())
             set_owner("realized-first")
             first = state.create("realized-first", root, profile_path, profile_data)
+            alive(stack, state, first)
             self.assertTrue(state.admit(first["id"], {"ram_gb": 0.01, "cpu_cores": 0.01},
                                         deterministic_capacity())[0])
             first = state.read(first["id"])
@@ -257,7 +409,9 @@ class StateTests(unittest.TestCase):
             root = parent / "root"
             root.mkdir()
             profile_path, profile_data = profile(root)
+            profile_data["backfill_seconds"] = 0
             state = State(parent / "state")
+            stack = self.enterContext(contextlib.ExitStack())
             set_owner("fifo-old")
             old = state.create("old-start", root, profile_path, profile_data)
             time.sleep(0.01)
@@ -267,6 +421,7 @@ class StateTests(unittest.TestCase):
             time.sleep(0.01)
             set_owner("fifo-new")
             new = state.create("new-start", root, profile_path, profile_data)
+            alive(stack, state, old, prepared, new)
             scarce = deterministic_capacity()
             scarce["system"].update(memory_effective_available_gb=0, cpu_idle_percent=0)
             set_owner("fifo-old")

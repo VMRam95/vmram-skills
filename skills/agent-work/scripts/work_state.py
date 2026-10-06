@@ -45,11 +45,42 @@ class State:
             raise RuntimeError('Linked state lock rejected')
         fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         with os.fdopen(fd, 'a') as handle:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
-            except BlockingIOError as exc:
-                raise RuntimeError('This task already has an operation in progress') from exc
+            # holder_alive() probes job locks for a few microseconds; a brief retry
+            # keeps that probe from being mistaken for a concurrent operation.
+            deadline = time.monotonic() + (0 if blocking else 1)
+            while True:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+                    break
+                except BlockingIOError as exc:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('This task already has an operation in progress') from exc
+                    time.sleep(.02)
             yield
+
+    def holder_alive(self, identifier):
+        """True while some CLI operation holds this job's lock.
+
+        Every start/validate/exec/close holds job-<id>.lock for its whole life and
+        the kernel drops it when that process dies, so an unheld lock proves no
+        operation can still realize the job's reservation or queue position.
+        """
+        path = self.root/f'job-{identifier}.lock'
+        if path.resolve() != path.absolute():
+            raise RuntimeError('Linked state lock rejected')
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except FileNotFoundError:
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+        finally:
+            os.close(fd)
 
     def path(self, identifier):
         if len(identifier) != 32 or any(c not in '0123456789abcdef' for c in identifier):
@@ -195,6 +226,11 @@ class State:
                 raise RuntimeError('A closed generation cannot reserve capacity')
             live = [j for j in self.active() if j['id'] != identifier]
             atomic_json(self.root/'active.json',[j['id'] for j in live]+[identifier])
+            # A job whose CLI died keeps its journal for close/recovery, but it can
+            # neither realize a pending reservation nor take its queue turn. Its
+            # surviving processes, if any, are still counted by physical usage.
+            abandoned = [j['id'] for j in live if not self.holder_alive(j['id'])]
+            live = [j for j in live if j['id'] not in abandoned]
             waiting = sorted([j for j in live if j.get('waiting_for_capacity')], key=lambda j:j['created'])
             system = snapshot['system']
             for field in ('memory_effective_available_gb','logical_cpus','cpu_idle_percent'):
@@ -205,15 +241,27 @@ class State:
             cpu = system['logical_cpus']*system['cpu_idle_percent']/100 - reserve['cpu_cores']
             pending = [j for j in live if j.get('reservation_pending',True) or
                        snapshot.get('observed_epoch',0) < j.get('allocation_realized',float('inf'))]
-            ram_claimed = sum(j['budget']['ram_gb'] for j in pending)
-            cpu_claimed = sum(j['budget']['cpu_cores'] for j in pending)
+            # A pending phase is charged only the growth it has not reached yet:
+            # what its registered groups already use is in the physical sample.
+            measured = {m.get('id'): m for m in snapshot.get('managed_resources', {}).get('jobs', [])
+                        if m.get('id')}
+            def remaining(j, field, used):
+                value = measured.get(j['id'], {}).get(used, 0) or 0
+                return max(0, j['budget'][field] - (value / 100 if used == 'cpu_percent' else value))
+            ram_claimed = sum(remaining(j, 'ram_gb', 'rss_gb') for j in pending)
+            cpu_claimed = sum(remaining(j, 'cpu_cores', 'cpu_percent') for j in pending)
             reasons = []
             if not 0 <= time.time() - snapshot.get('observed_epoch', 0) <= 30:
                 reasons.append('capacity measurement expired')
             # An already admitted stack can finish and release capacity ahead of
             # queued starts; strict FIFO among starts must not deadlock completion.
             completing=bool(job.get('adapter',{}).get('prepared'))
-            if not completing and waiting and waiting[0]['created'] < job['created']:
+            # Bounded backfill: a later task that fits may pass a head that cannot,
+            # until the head has waited backfill_seconds; then strict FIFO resumes.
+            head = waiting[0] if waiting else None
+            limit = job['profile_data'].get('backfill_seconds', 900)
+            if (not completing and head and head['created'] < job['created']
+                    and time.time() - head.get('queued_since', time.time()) >= limit):
                 reasons.append('an earlier queued task has priority')
             if available < ram_claimed + budget['ram_gb']:
                 reasons.append('memory')
@@ -226,10 +274,12 @@ class State:
                 reasons.append('disk')
             job['waiting_for_capacity'] = bool(reasons)
             job['wait_reason'] = ', '.join(reasons)
+            job['queued_since'] = (job.get('queued_since') or time.time()) if reasons else None
             job['capacity_at_admission'] = snapshot
             job.setdefault('admission_samples',[]).append({'epoch':time.time(),'budget':budget,
                 'available_ram_gb':system['memory_effective_available_gb'],'cpu_idle_percent':system['cpu_idle_percent'],
-                'pending_ram_gb':ram_claimed,'pending_cpu_cores':cpu_claimed,'disk_free_gb':round(free_gb,3),'reasons':reasons})
+                'pending_ram_gb':round(ram_claimed,3),'pending_cpu_cores':round(cpu_claimed,3),'disk_free_gb':round(free_gb,3),'reasons':reasons,
+                'abandoned_jobs':abandoned})
             if not reasons:
                 job['budget'] = budget
                 job['reservation_pending'] = True
