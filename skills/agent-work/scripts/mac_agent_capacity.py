@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure macOS headroom and attribute CodeAgentSwarm process trees."""
+"""Measure host headroom (macOS, or Linux/WSL2 via /proc) and attribute agent process trees."""
 
 import argparse
 import json
@@ -136,6 +136,113 @@ def measure_disk(path=None):
     return usage.free / 1073741824, usage.total / 1073741824
 
 
+def read_text(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def parse_meminfo(text):
+    """kB fields of /proc/meminfo -> bytes."""
+    values = {}
+    for line in text.splitlines():
+        name, _, rest = line.partition(":")
+        fields = rest.split()
+        if fields and fields[0].isdigit():
+            values[name] = int(fields[0]) * 1024
+    return values
+
+
+def parse_proc_stat(text):
+    """Aggregate CPU jiffies and instantaneous running/blocked tasks from /proc/stat."""
+    cpu, running, blocked = None, None, None
+    for line in text.splitlines():
+        fields = line.split()
+        if fields and fields[0] == "cpu":
+            cpu = [int(value) for value in fields[1:]]
+        elif fields and fields[0] == "procs_running":
+            running = int(fields[1])
+        elif fields and fields[0] == "procs_blocked":
+            blocked = int(fields[1])
+    return cpu, running, blocked
+
+
+def cpu_split(before, after):
+    """user/sys/idle percentages between two /proc/stat `cpu` samples."""
+    delta = [b - a for a, b in zip(before, after)]
+    total = sum(delta) or 1
+    user = delta[0] + delta[1]                          # user + nice
+    system = sum(delta[2:3]) + sum(delta[5:8])          # system + irq + softirq + steal
+    idle = delta[3] + (delta[4] if len(delta) > 4 else 0)  # idle + iowait: CPU not doing work
+    return (round(user / total * 100, 1), round(system / total * 100, 1),
+            round(idle / total * 100, 1))
+
+
+def parse_vmstat(text):
+    return {name: int(value) for name, value in
+            (line.split()[:2] for line in text.splitlines() if len(line.split()) >= 2)
+            if value.isdigit()}
+
+
+def linux_metrics():
+    """Linux (and WSL2) through /proc only: same fields and window as the macOS sampler.
+
+    Under WSL2 these are the WSL utility VM's numbers (bounded by .wslconfig), which is
+    also where Docker Desktop's WSL2 engine runs."""
+    before = parse_proc_stat(read_text("/proc/stat"))[0]
+    swap_before = parse_vmstat(read_text("/proc/vmstat")).get("pswpout", 0)
+    time.sleep(CPU_WINDOW_SECONDS)
+    after, running, blocked = parse_proc_stat(read_text("/proc/stat"))
+    swap_after = parse_vmstat(read_text("/proc/vmstat")).get("pswpout", 0)
+    memory = parse_meminfo(read_text("/proc/meminfo"))
+    total = memory["MemTotal"]
+    available = memory.get("MemAvailable", memory.get("MemFree", 0))
+    user, system, idle = cpu_split(before, after)
+    load = read_text("/proc/loadavg").split()[:3]
+    release = os.uname().release
+    return {
+        "model": ("WSL2 " if "microsoft" in release.lower() else "Linux ") + release,
+        "total_bytes": total,
+        "free_pct": round(available / total * 100, 1),
+        "logical_cpus": os.cpu_count() or 1,
+        "cpu": (user, system, idle),
+        "load": tuple(load) if len(load) == 3 else None,
+        "swapout_delta": max(swap_after - swap_before, 0),
+        "threads": (running, blocked),
+    }
+
+
+def macos_metrics():
+    top = run("top", "-l", "2", "-n", "0", "-s", str(CPU_WINDOW_SECONDS))
+    cpu = last_match(
+        r"CPU usage:\s*([\d.]+)% user,\s*([\d.]+)% sys,\s*([\d.]+)% idle",
+        top,
+    )
+    load = last_match(r"Load Avg:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)", top)
+    vm = last_match(r"VM:.*?(\d+)\((\d+)\) swapins,\s*(\d+)\((\d+)\) swapouts", top)
+    pressure = run("memory_pressure", "-Q")
+    return {
+        "model": run("sysctl", "-n", "hw.model").strip(),
+        "total_bytes": int(run("sysctl", "-n", "hw.memsize").strip()),
+        "free_pct": float(re.search(r"free percentage:\s*(\d+)%", pressure).group(1)),
+        "logical_cpus": int(run("sysctl", "-n", "hw.logicalcpu").strip()),
+        "cpu": tuple(float(value) for value in cpu),
+        "load": load,
+        "swapout_delta": int(vm[3]) if vm else 0,
+        "threads": count_thread_states(),
+    }
+
+
+def host_metrics():
+    """Physical headroom of this host: macOS natively, Linux/WSL2 through /proc."""
+    system = os.uname().sysname
+    if system == "Darwin":
+        return macos_metrics()
+    if system == "Linux":
+        return linux_metrics()
+    raise SystemExit(f"Medición no disponible en {system}: usa macOS o Linux/WSL2; "
+                     "no se inventa una estimación.")
+
+
 def compute_capacity(
     total_gb,
     free_pct,
@@ -263,22 +370,15 @@ def snapshot(args):
 
     platform_pids = all_app_pids - agent_pids
     platform = [processes[pid] for pid in platform_pids if pid in processes]
-    top = run("top", "-l", "2", "-n", "0", "-s", str(CPU_WINDOW_SECONDS))
-    cpu = last_match(
-        r"CPU usage:\s*([\d.]+)% user,\s*([\d.]+)% sys,\s*([\d.]+)% idle",
-        top,
-    )
-    load = last_match(r"Load Avg:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)", top)
-    vm = last_match(r"VM:.*?(\d+)\((\d+)\) swapins,\s*(\d+)\((\d+)\) swapouts", top)
-    pressure = run("memory_pressure", "-Q")
-    free_pct = float(re.search(r"free percentage:\s*(\d+)%", pressure).group(1))
-    total_bytes = int(run("sysctl", "-n", "hw.memsize").strip())
-    logical_cpus = int(run("sysctl", "-n", "hw.logicalcpu").strip())
-    total_gb = total_bytes / 1073741824
+    host = host_metrics()
+    cpu, load = host["cpu"], host["load"]
+    free_pct = host["free_pct"]
+    logical_cpus = host["logical_cpus"]
+    total_gb = host["total_bytes"] / 1073741824
     args.logical_cpus = logical_cpus
     idle_pct = float(cpu[2])
-    swapout_delta = int(vm[3]) if vm else 0
-    runnable_threads, uninterruptible_threads = count_thread_states()
+    swapout_delta = host["swapout_delta"]
+    runnable_threads, uninterruptible_threads = host["threads"]
     load1 = float(load[0]) if load else None
     disk_free_gb, disk_total_gb = measure_disk()
     if managed_resources is None:
@@ -314,7 +414,7 @@ def snapshot(args):
     return {
         "snapshot_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "system": {
-            "model": run("sysctl", "-n", "hw.model").strip(),
+            "model": host["model"],
             "logical_cpus": logical_cpus,
             "memory_total_gb": round(total_gb, 2),
             "memory_effective_available_gb": round(total_gb * free_pct / 100, 2),
@@ -351,6 +451,16 @@ def snapshot(args):
 
 
 def self_test():
+    # Linux/WSL2 backend parsers (pure; the live sampler only adds /proc reads and a sleep).
+    memory = parse_meminfo("MemTotal:       16384000 kB\nMemFree:  1000 kB\nMemAvailable:    8192000 kB\n")
+    assert memory["MemTotal"] == 16384000 * 1024 and memory["MemAvailable"] == 8192000 * 1024
+    before, _, _ = parse_proc_stat("cpu  100 0 50 800 50 0 0 0 0 0\nprocs_running 1\n")
+    after, running, blocked = parse_proc_stat(
+        "cpu  160 0 70 1100 70 0 0 0 0 0\ncpu0 1 2 3 4\nprocs_running 3\nprocs_blocked 2\n")
+    assert (running, blocked) == (3, 2)
+    assert cpu_split(before, after) == (15.0, 5.0, 80.0)
+    assert parse_vmstat("pswpin 5\npswpout 1200\n")["pswpout"] == 1200
+
     sample = " 10  1  2.5 1024 /app/CodeAgentSwarm\n 11 10 10.0 2048 node\n"
     processes = parse_processes(sample)
     assert processes[11]["ppid"] == 10
@@ -463,8 +573,6 @@ def main():
     if args.self_test:
         self_test()
         return
-    if os.uname().sysname != "Darwin":
-        raise SystemExit("Esta versión mide macOS; no inventa una estimación en otro sistema.")
     print(json.dumps(snapshot(args), ensure_ascii=False, indent=2))
 
 
