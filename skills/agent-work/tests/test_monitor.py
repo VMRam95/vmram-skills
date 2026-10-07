@@ -168,6 +168,50 @@ class CapacityTests(unittest.TestCase):
         self.assertIn("Crecimiento reservado: 6.0 GB · 2.0 CPU", text)
         self.assertIn("tmf/CAS4958", text)
 
+    def test_plugin_turns_yellow_then_red_by_disk_and_notifies_each_change(self):
+        path = SCRIPTS / "agent-watch.30s.py"
+        spec = importlib.util.spec_from_file_location("agent_watch_plugin_disk", path)
+        plugin = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(plugin)
+
+        def sample(free_gb):
+            args = argparse.Namespace(agent_budget_gb=2.5, reserve_gb=8, agent_cpu_cores=1.5,
+                                      cpu_reserve_cores=2, logical_cpus=14)
+            capacity = mac_agent_capacity.compute_capacity(
+                36, 80, 90, [], args, load1=1, uninterruptible_threads=0,
+                disk_free_gb=free_gb, disk_total_gb=926)
+            capacity["load_pressure"] = "normal"
+            return {
+                "system": {"logical_cpus": 14, "load_average": [1, 1, 1],
+                           "uninterruptible_threads": 0, "runnable_threads": 1,
+                           "cpu_idle_percent": 90, "memory_effective_available_gb": 28,
+                           "memory_total_gb": 36, "disk_free_gb": free_gb,
+                           "disk_total_gb": 926, "disk_free_percent": free_gb / 9.26},
+                "capacity": capacity, "agent_totals": {"count": 0, "rss_gb": 0, "cpu_percent": 0},
+                "codeagentswarm_overhead": {"rss_gb": 0}, "agents": [], "managed_resources": {},
+            }
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(plugin, "STATE", Path(temporary) / "state"), \
+             patch.object(plugin.subprocess, "run"), \
+             patch.object(plugin, "notify") as notify:
+            lines = []
+            for free in (183, 93, 21):
+                output = io.StringIO()
+                with patch.object(plugin.cap, "snapshot", return_value=sample(free)), \
+                     contextlib.redirect_stdout(output):
+                    plugin.main()
+                lines.append(output.getvalue())
+        self.assertTrue(lines[0].startswith("🟢"))
+        self.assertTrue(lines[1].startswith("🟡"))
+        self.assertIn("Disco libre: 93 / 926 GiB (10%) · bajo", lines[1])
+        self.assertTrue(lines[2].startswith("🔴 0"))
+        self.assertIn("limita disco", lines[2])
+        texts = [call.args[1] for call in notify.call_args_list]
+        self.assertEqual(2, len(texts))
+        self.assertIn("Disco bajo: 93 GiB", texts[0])
+        self.assertIn("Disco en rojo: 21 GiB", texts[1])
+
 
 
 

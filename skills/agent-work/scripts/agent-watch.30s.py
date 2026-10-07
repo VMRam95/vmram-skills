@@ -5,7 +5,8 @@ Reutiliza mac_agent_capacity.py (misma carpeta), que lleva el criterio entero:
 memoria por presión + swapouts, CPU por % ociosa real, y veto de I/O solo si la
 cola supera los núcleos Y hay hilos en espera ininterrumpida (estado U). Una
 carga alta sola, con CPU y RAM libres, se muestra como aviso pero no veta.
-Notifica con osascript al cambiar de verde a rojo.
+El disco libre del volumen de datos también manda: amarillo avisa, rojo pone 0
+agentes. Notifica con osascript al cambiar de estado (verde/amarillo/rojo).
 """
 
 import argparse
@@ -72,16 +73,22 @@ def main():
     cores = sysinfo["logical_cpus"]
     slots = capacity["additional_agents_conservative"]
     limit = capacity["limiting_resource"]
-    state = "green" if slots >= 1 else "red"
-    icon = "🟢" if state == "green" else "🔴"
+    disk = capacity.get("disk_state")
+    free = sysinfo.get("disk_free_gb")
+    state = "red" if slots < 1 else "yellow" if disk in ("yellow", "red") else "green"
+    icon = {"green": "🟢", "yellow": "🟡", "red": "🔴"}[state]
 
     prev = STATE.read_text().strip() if STATE.exists() else ""
     if prev and prev != state:
-        notify(
-            "Agent Watch",
-            f"Ya entran {slots} agentes" if state == "green"
-            else f"No entran más agentes: limita {limit}",
-        )
+        if state == "red" and limit == "disco":
+            text = f"Disco en rojo: {free:.0f} GiB libres. Limpia antes de abrir agentes o carriles"
+        elif state == "red":
+            text = f"No entran más agentes: limita {limit}"
+        elif state == "yellow":
+            text = f"Disco bajo: {free:.0f} GiB libres. Revisa la limpieza de los proyectos"
+        else:
+            text = f"Ya entran {slots} agentes"
+        notify("Agent Watch", text)
     STATE.parent.mkdir(parents=True, exist_ok=True)
     STATE.write_text(state)
 
@@ -102,6 +109,13 @@ def main():
     if capacity["load_pressure"] == "alta":
         print(f"⚠ cola > núcleos sin bloqueo I/O probado: la carga sola no veta {FONT}")
     print(f"CPU libre: {sysinfo['cpu_idle_percent']:.0f}%   RAM efectiva: {sysinfo['memory_effective_available_gb']:.1f} / {sysinfo['memory_total_gb']:.0f} GB {FONT}")
+    if free is None:
+        print(f"Disco libre: n/d {FONT}")
+    else:
+        mark = {"red": " · ROJO: 0 agentes", "yellow": " · bajo"}.get(disk, "")
+        color = {"red": " color=red", "yellow": " color=orange"}.get(disk, "")
+        print(f"Disco libre: {free:.0f} / {sysinfo['disk_total_gb']:.0f} GiB "
+              f"({sysinfo['disk_free_percent']:.0f}%){mark} {FONT}{color}")
     t = data["agent_totals"]
     o = data["codeagentswarm_overhead"]
     print(f"Agentes: {t['count']} · {t['rss_gb']:.1f} GB · {t['cpu_percent']:.0f}% CPU   CAS: {o['rss_gb']:.1f} GB {FONT}")

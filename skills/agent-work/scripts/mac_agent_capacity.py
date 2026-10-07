@@ -6,6 +6,7 @@ import json
 import math
 import os
 import re
+import shutil
 import statistics
 import subprocess
 import time
@@ -110,6 +111,29 @@ CPU_WINDOW_SECONDS = 3
 SWAP_PRESSURE_PAGES = 1024
 # Measured agent sessions use 1.3–1.5 GB; the budget is still 1.5 x their median.
 AGENT_BUDGET_FLOOR_GB = 2.5
+# Free space on the data volume, where Docker VMs, worktrees and run artifacts live.
+# On 2026-10-07 21 GiB free (2 %) killed Docker Desktop. Each bound is the smaller of
+# (percent of the volume, GiB): big disks warn by GiB, small disks by percent.
+DISK_YELLOW = (15, 100)
+DISK_RED = (8, 50)
+
+
+def disk_state(free_gb, total_gb):
+    """green/yellow/red for the data volume; None when it could not be measured."""
+    if free_gb is None or not total_gb:
+        return None
+    for name, (percent, gib) in (("red", DISK_RED), ("yellow", DISK_YELLOW)):
+        if free_gb < min(total_gb * percent / 100, gib):
+            return name
+    return "green"
+
+
+def measure_disk(path=None):
+    try:
+        usage = shutil.disk_usage(path or os.path.expanduser("~"))
+    except OSError:
+        return None, None
+    return usage.free / 1073741824, usage.total / 1073741824
 
 
 def compute_capacity(
@@ -123,6 +147,8 @@ def compute_capacity(
     uninterruptible_threads=None,
     pending_ram_gb=0,
     pending_cpu_cores=0,
+    disk_free_gb=None,
+    disk_total_gb=None,
 ):
     available_gb = total_gb * free_pct / 100
     median_rss = statistics.median(agent_rss) if agent_rss else 0
@@ -161,6 +187,11 @@ def compute_capacity(
         additional = min(memory_slots, cpu_slots)
         physical_additional = min(physical_memory_slots, physical_cpu_slots)
         limiting = "memoria" if memory_slots <= cpu_slots else "CPU"
+    disk = disk_state(disk_free_gb, disk_total_gb)
+    if disk == "red":
+        # A full disk breaks Docker and every stack at once: no new agent or lane.
+        additional = physical_additional = 0
+        limiting = "disco"
     if io_contention:
         load_pressure = "saturación I/O"
     elif load1 is None:
@@ -186,6 +217,8 @@ def compute_capacity(
         "pending_cpu_cores": round(pending_cpu_cores, 3),
         "reserve_gb": args.reserve_gb,
         "cpu_reserve_cores": args.cpu_reserve_cores,
+        "disk_state": disk,
+        "disk_free_gb": None if disk_free_gb is None else round(disk_free_gb, 1),
     }
 
 
@@ -247,6 +280,7 @@ def snapshot(args):
     swapout_delta = int(vm[3]) if vm else 0
     runnable_threads, uninterruptible_threads = count_thread_states()
     load1 = float(load[0]) if load else None
+    disk_free_gb, disk_total_gb = measure_disk()
     if managed_resources is None:
         managed = {
             "jobs": [], "active_jobs": 0, "queued_jobs": 0, "pending_jobs": 0,
@@ -273,6 +307,8 @@ def snapshot(args):
         uninterruptible_threads,
         managed["pending_ram_gb"],
         managed["pending_cpu_cores"],
+        disk_free_gb,
+        disk_total_gb,
     )
 
     return {
@@ -291,6 +327,10 @@ def snapshot(args):
             "swap_pressure": swapout_delta > SWAP_PRESSURE_PAGES,
             "runnable_threads": runnable_threads,
             "uninterruptible_threads": uninterruptible_threads,
+            "disk_free_gb": None if disk_free_gb is None else round(disk_free_gb, 1),
+            "disk_total_gb": None if disk_total_gb is None else round(disk_total_gb, 1),
+            "disk_free_percent": (round(disk_free_gb / disk_total_gb * 100, 1)
+                                  if disk_free_gb is not None and disk_total_gb else None),
         },
         "agents": agents,
         "agent_totals": {
@@ -390,6 +430,24 @@ def self_test():
         + "         1     0.0 U 37T 0:00.05 0:00.04\n"
     )
     assert (runnable, uninterruptible) == (1, 1)
+
+    # Disco del 07/10/2026 en un Mac de 926 GiB: 21 GiB libres = rojo, 0 agentes.
+    assert disk_state(21, 926) == "red"
+    assert disk_state(93, 926) == "yellow"
+    assert disk_state(183, 926) == "green"
+    assert disk_state(None, None) is None
+    # Disco pequeño: manda el porcentaje (256 GiB → rojo < 20,5, amarillo < 38,4).
+    assert disk_state(30, 256) == "yellow" and disk_state(40, 256) == "green"
+    full = compute_capacity(36, 81, 90, [], args, load1=2, uninterruptible_threads=0,
+                            disk_free_gb=21, disk_total_gb=926)
+    assert full["can_start_another"] is False
+    assert full["physical_additional_agents_conservative"] == 0
+    assert full["limiting_resource"] == "disco" and full["disk_state"] == "red"
+    low = compute_capacity(36, 81, 90, [], args, load1=2, uninterruptible_threads=0,
+                           disk_free_gb=93, disk_total_gb=926)
+    assert low["can_start_another"] is True and low["disk_state"] == "yellow"
+    # Sin medición de disco no se veta a ciegas.
+    assert compute_capacity(36, 81, 90, [], args)["disk_state"] is None
 
     print("self-test: OK")
 
