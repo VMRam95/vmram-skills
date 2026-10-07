@@ -34,6 +34,8 @@ Incluye, sin relleno:
 - presión de cola (`load_pressure`: normal / alta / saturación I/O) y hilos en
   espera ininterrumpida cuando la carga supere los núcleos;
 - RAM total y RAM efectiva disponible según `memory_pressure`;
+- disco libre del volumen de datos (`disk_free_gb`, `disk_free_percent`) y su estado
+  (`disk_state`: green / yellow / red);
 - consumo agregado de los agentes y sobrecoste de CodeAgentSwarm;
 - qué agentes ocupan recursos;
 - cuántos agentes adicionales caben con el margen configurado;
@@ -48,7 +50,7 @@ tokens. Para ajustar cargas especialmente pesadas, usa `--agent-budget-gb`,
 ## Semáforo en la barra de menús (tiempo real, sin terminal)
 
 Desde el 2026-09-06 el veredicto de esta skill está siempre a la vista en la barra de
-menús: `🟢 N` (caben N agentes más) o `🔴 0`. Lo pinta **SwiftBar**
+menús: `🟢 N` (caben N agentes más), `🟡 N` (caben, pero el disco está bajo) o `🔴 0`. Lo pinta **SwiftBar**
 (`~/Applications/SwiftBar.app`, cask de Homebrew instalado sin sudo) ejecutando cada
 30 s el plugin `scripts/agent-watch.30s.py`, que reutiliza `mac_agent_capacity.py`.
 El desplegable muestra carga, CPU libre, RAM efectiva, una línea por cuadrante y los
@@ -70,8 +72,17 @@ Tarjeta Kanban: sandbox #4618. Captura de referencia:
   prueba exclusiva de disco. Con cola alta sin esperas U el JSON
   informa `load_pressure: "alta"` (aviso en el desplegable) y no veta. Si `ps -axM`
   no responde, la medición es inconclusa y tampoco veta a ciegas.
+- **Disco** (desde el 2026-10-07, cuando 21 GiB libres de 926 tumbaron Docker
+  Desktop): se mide el volumen de datos del home, donde viven las VM de Docker, los
+  worktrees y los artefactos. Cada umbral es el **menor** entre un porcentaje y unos
+  GiB, para que un disco grande avise por GiB y uno pequeño por porcentaje:
+  **amarillo** por debajo de min(15 %, 100 GiB) — aviso, no resta agentes; **rojo**
+  por debajo de min(8 %, 50 GiB) — 0 agentes nuevos, limita `disco`, y `agent-work`
+  deja en cola carriles y FULL. Sin medición de disco no se veta a ciegas. Es solo
+  lectura: no borra nada; la limpieza sigue la norma de `agent-local-work`.
 - **Aviso nativo** (`osascript display notification`) solo al cambiar de estado
-  verde↔rojo, nunca cada 30 s. Último estado en `~/.cache/agent-watch/state`.
+  verde/amarillo/rojo, nunca cada 30 s; el rojo por disco y el amarillo nombran los
+  GiB libres. Último estado en `~/.cache/agent-watch/state`.
 - Si el script base revienta, la barra muestra `⚪️ ?` y el desplegable trae el error.
 
 ### Fuente única y piezas instaladas
