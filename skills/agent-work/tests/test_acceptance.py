@@ -750,6 +750,31 @@ class FixtureLifecycleTests(unittest.TestCase):
             finally:
                 self.cleanup_and_preserve(state, "source-reload-capacity", (job, "reload-owner"))
 
+    def test_failed_source_reload_keeps_the_job_for_a_retry(self):
+        with run_workspace("source-reload-failure") as parent:
+            try:
+                state, flow, job = self.new_flow(parent, "source-reload-failure", "reload-failure-owner")
+                with mock.patch.object(agent_work, 'capacity', side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                current = state.read(job['id'])
+                state.update_adapter(job['id'],
+                                     served_source_manifest=agent_work.git_manifest(current['adapter']['repositories']))
+                repo = Path(current['adapter']['repositories']['fixture']['worktree'])
+                (repo / 'reload-proof.txt').write_text('changed source')
+                original = agent_work.Flow.hook
+                def refused(self, phase, *args, **kwargs):
+                    return 1 if phase == 'health' else original(self, phase, *args, **kwargs)
+                with mock.patch.object(agent_work.Flow, 'hook', refused):
+                    self.assertEqual(1, self.call_main("start", "--job", job["id"], "--state-dir", str(state.root)))
+                kept = state.read(job['id'])
+                self.assertEqual('ready', kept['state'])
+                self.assertNotIn('close', [p['phase'] for p in kept['phases']])
+                self.assertEqual(0, self.call_main("start", "--job", job["id"], "--state-dir", str(state.root)))
+                self.assertEqual('ready', state.read(job['id'])['state'])
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, "source-reload-failure", (job, "reload-failure-owner"))
+
     def test_cli_exec_keeps_reservation_when_phase_cleanup_is_denied(self):
         with run_workspace("cli-exec-cleanup-denied") as parent:
             state, _, job = self.new_flow(parent, "cli-exec-cleanup-denied", "cli-exec-denied-owner")
