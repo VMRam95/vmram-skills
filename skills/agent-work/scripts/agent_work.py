@@ -323,7 +323,10 @@ class Flow:
                 # serving: the project keeps its resources and data, the owner fixes
                 # the change and reloads again (or closes the job explicitly).
                 self.reload_failed = True
-                print(f"[{job['task']}] reload failed; the job is kept. Fix the change and run "
+                log = Path(self.job()['phases'][-1].get('log') or '')
+                lines = [l for l in log.read_text(errors='replace').splitlines() if l.strip()] if log.is_file() else []
+                reason = next((l for l in reversed(lines) if not l.startswith('[')), lines[-1] if lines else '')
+                print(f"[{job['task']}] reload failed; the job is kept. {reason}\nFix the change and run "
                       f"`agent-work start --job {job['id']}` again, or close it", file=sys.stderr, flush=True)
             return rc
         if not self.admit('up',max(0,deadline-time.monotonic())): return 75
