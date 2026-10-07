@@ -326,6 +326,27 @@ class StateTests(unittest.TestCase):
             self.assertFalse(admitted)
             self.assertIn("memory", current["wait_reason"])
 
+    def test_red_disk_queues_lanes_and_full_runs_with_a_clear_reason(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary).resolve()
+            root = parent / "project"
+            root.mkdir()
+            profile_path, profile_data = profile(root)
+            state = State(parent / "state")
+            set_owner("disk-red")
+            job = state.create("disk-red", root, profile_path, profile_data)
+            stack = self.enterContext(contextlib.ExitStack())
+            alive(stack, state, job)
+            sample = deterministic_capacity()
+            sample["system"]["disk_free_gb"] = 21.0
+            sample["capacity"].update(disk_state="red", disk_free_gb=21.0)
+            admitted, current = state.admit(job["id"], {"ram_gb": 0.01, "cpu_cores": 0.01}, sample)
+            self.assertFalse(admitted)
+            self.assertIn("disk red: 21.0 GiB free", current["wait_reason"])
+            self.assertIn("agent-local-work", current["wait_reason"])
+            sample["capacity"].update(disk_state="yellow", disk_free_gb=93.0)
+            self.assertTrue(state.admit(job["id"], {"ram_gb": 0.01, "cpu_cores": 0.01}, sample)[0])
+
     def test_host_reserve_overrides_the_profile_on_each_sample(self):
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary).resolve()

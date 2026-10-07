@@ -29,7 +29,10 @@ failed start with cleanup. Persist that failure rather than counting it as a pas
 A queued job returns exit 75. Initial admission opens no project resources;
 capacity queues for an existing ready stack retain its verified resources. Resume `start`
 with the same job, or use bounded `--wait`. Tasks can coexist while expensive
-stacks/tests wait for physically measured RAM, CPU and disk. Every operation holds
+stacks/tests wait for physically measured RAM, CPU and disk. Disk has two checks:
+the profile's `reserve.disk_gb` on the project volume and the shared sampler's
+`disk_state`; while it is `red` (below min(8 %, 50 GiB) free) no new lane or FULL
+is admitted and the wait reason says how much is free and to clean up first. Every operation holds
 its job lock for its whole life; when the CLI dies the kernel drops it, and that
 job stops charging its pending reservation and loses its queue turn (it shows as
 `abandoned` and still needs `close`). The queue is FIFO with bounded backfill: a

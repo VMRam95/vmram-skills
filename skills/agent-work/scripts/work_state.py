@@ -325,6 +325,11 @@ class State:
             free_gb = os.statvfs(job['root']).f_bavail*os.statvfs(job['root']).f_frsize/(1024**3)
             if free_gb < reserve.get('disk_gb',5):
                 reasons.append('disk')
+            # The shared sampler's verdict for the data volume (Docker VMs live there).
+            if snapshot['capacity'].get('disk_state') == 'red':
+                reasons.append(f"disk red: {snapshot['capacity'].get('disk_free_gb')} GiB free on the data "
+                               'volume; no new lanes or FULL runs until the projects clean up '
+                               '(agent-local-work, retention and cleanup)')
             job['waiting_for_capacity'] = bool(reasons)
             job['wait_reason'] = ', '.join(reasons)
             job['queued_since'] = (job.get('queued_since') or time.time()) if reasons else None
