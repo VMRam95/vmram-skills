@@ -94,6 +94,10 @@ class StateTests(unittest.TestCase):
             with state.locked():
                 self.assertEqual([current['id']], [j['id'] for j in state.active()])
             self.assertTrue(state.admit(current['id'], {'ram_gb': .01, 'cpu_cores': .01}, deterministic_capacity())[0])
+            # New work and same-job recovery must not deserialize broken/cold closed history.
+            later = state.create('later', root, profile_path, profile_data)
+            self.assertNotEqual(current['id'], later['id'])
+            self.assertEqual(current['id'], state.create('current', root, profile_path, profile_data)['id'])
 
     def test_preserved_runs_are_unique_and_never_overwrite_red_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:
