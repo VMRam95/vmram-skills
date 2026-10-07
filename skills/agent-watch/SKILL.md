@@ -19,6 +19,11 @@ lógicos del equipo como sustituto de CPU y memoria.
    ```
 
    Los clientes instalados enlazan a la misma fuente; no mantienen copias del medidor.
+   Mide macOS de forma nativa y **Linux/WSL2** leyendo `/proc` (memoria disponible,
+   CPU en una ventana de 3 s, swap, carga y tareas bloqueadas). En WSL2 las cifras son las
+   de la VM de WSL, limitada por `.wslconfig`, que es donde corre el motor de Docker
+   Desktop. El semáforo de la barra de menús (SwiftBar) solo existe en macOS. Windows
+   nativo no está soportado.
 2. El consumo procede de los árboles de procesos reales. Consulta nombres de sesiones
    únicamente dentro de una revisión de coordinación autorizada; medir capacidad no
    autoriza sondear sesiones. El JSON incluye los jobs del gestor común y sus grupos
