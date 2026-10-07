@@ -62,6 +62,7 @@ class Flow:
         self.state, self.identifier = state, identifier
         self.recovering = False
         self.in_admission = False
+        self.reload_failed = False
 
     def job(self):
         data = self.state.read(self.identifier)
@@ -317,6 +318,13 @@ class Flow:
                           reservation_pending=False, allocation_realized=time.time())
                 if reloads:
                     self.save(gate=None, delivery=None)
+            elif reloads:
+                # A refused or failed reload must not destroy a lane that was
+                # serving: the project keeps its resources and data, the owner fixes
+                # the change and reloads again (or closes the job explicitly).
+                self.reload_failed = True
+                print(f"[{job['task']}] reload failed; the job is kept. Fix the change and run "
+                      f"`agent-work start --job {job['id']}` again, or close it", file=sys.stderr, flush=True)
             return rc
         if not self.admit('up',max(0,deadline-time.monotonic())): return 75
         if not job['adapter'].get('prepared'):
@@ -520,7 +528,7 @@ def main():
                     rc=0 if delivery['passed'] else 1
                 else:
                     rc=getattr(flow,args.action)(*([args.wait] if args.action in ('start','validate') else []))
-                if args.action in ('start','validate') and rc not in (0,75):
+                if args.action in ('start','validate') and rc not in (0,75) and not flow.reload_failed:
                     if flow.close(): rc=1
         except BaseException as exc:
             # Interrupting only the wait for capacity must not tear down a prepared
