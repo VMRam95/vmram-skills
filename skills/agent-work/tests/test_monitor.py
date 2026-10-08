@@ -216,6 +216,45 @@ class CapacityTests(unittest.TestCase):
 
 
 class ProcessTableTests(unittest.TestCase):
+    def test_one_query_retains_start_and_supervisor_identity(self):
+        runtime = managed_resources.runtime
+        start = 'Thu Oct  8 21:03:00 2026'
+        pid = 43210
+        path = Path(runtime.__file__).resolve()
+        output = (f'{pid} {pid} Ss {start} {path} supervise own-id --command-file fixture.json\n'
+                  f'43211 {pid} S {start} node worker.js\n'
+                  f'43212 {pid} Z {start} <defunct>\n'
+                  f'43213 {pid} S {start} ps -Aww\n')
+        with patch.object(runtime, 'ps_query', return_value=(0, output, 43213)) as query, \
+             patch.object(managed_resources.os, 'getpid', return_value=90000), \
+             patch.object(managed_resources.os, 'getpgrp', return_value=90000):
+            table = managed_resources.ProcessTable()
+            self.assertEqual(1, query.call_count)
+            self.assertEqual(start, table.rows[pid][2])
+            self.assertEqual([pid, 43211], table.members(pid))
+            record = {'pid': pid, 'start': start, 'identity': 'own-id'}
+            self.assertTrue(table.verified(record))
+            for field, value in [('start', 'Thu Oct  8 21:03:01 2026'),
+                                 ('identity', 'other-id'), ('pid', 43211), ('pid', 1)]:
+                self.assertFalse(table.verified(dict(record, **{field: value})))
+            with patch.object(managed_resources.os, 'getpgrp', return_value=pid):
+                self.assertFalse(table.verified(record))
+            del table.rows[pid]
+            self.assertFalse(table.verified(record))
+            self.assertEqual([43211], table.members(pid))
+
+    def test_incomplete_duplicate_and_failed_tables_fail_closed(self):
+        start = 'Thu Oct  8 21:03:00 2026'
+        row = f'43210 43210 Ss {start} worker\n'
+        for output in ('43210 43210 Ss\n', row + row):
+            with self.subTest(output=output), \
+                 patch.object(managed_resources.runtime, 'ps_query', return_value=(0, output, 43213)):
+                with self.assertRaises(ValueError):
+                    managed_resources.ProcessTable()
+        with patch.object(managed_resources.runtime, 'ps_query', return_value=(1, '', 43213)):
+            with self.assertRaises(managed_resources.subprocess.CalledProcessError):
+                managed_resources.ProcessTable()
+
     def test_real_table_matches_runtime_for_this_process_group(self):
         import os
         import managed_resources
