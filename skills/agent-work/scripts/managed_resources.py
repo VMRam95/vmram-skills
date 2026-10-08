@@ -3,6 +3,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import subprocess
 import time
 
@@ -16,29 +17,34 @@ class ProcessTable:
     """One host process table reused for every record of a sample.
 
     Same checks as process_runtime.members/verified (process group, exact start,
-    own group excluded, supervisor identity in its argv), but two ps calls per
+    own group excluded, supervisor identity in its argv), but one ps call per
     sample instead of three per record: under load the per-record queries took
     longer than the 30 s admission freshness window.
     """
 
     def __init__(self):
-        rc, output, first = runtime.ps_query(['-Ao', 'pid=,pgid=,stat=,lstart='])
+        rc, output, query = runtime.ps_query(['-Aww', '-o', 'pid=,pgid=,stat=,lstart=,args='])
         if rc:
             raise subprocess.CalledProcessError(rc, 'ps', output)
         self.rows = {}
-        for line in output.splitlines():
-            parts = line.split(None, 3)
-            if len(parts) == 4:
-                self.rows[int(parts[0])] = (int(parts[1]), parts[2], parts[3].strip())
-        rc, output, second = runtime.ps_query(['-Aww', '-o', 'pid=,args='])
-        if rc:
-            raise subprocess.CalledProcessError(rc, 'ps', output)
         self.args = {}
         for line in output.splitlines():
-            parts = line.strip().split(None, 1)
-            if len(parts) == 2:
-                self.args[int(parts[0])] = parts[1]
-        self.queries = {first, second}
+            if not line.strip():
+                continue
+            parts = line.split(None, 3)
+            # lstart has five fields; retain its original spacing so the start
+            # identity matches process_runtime.process_start exactly. Membership
+            # and argv now come from the same query, rather than separate tables.
+            start = re.fullmatch(r'(\S+\s+\S+\s+\S+\s+\S+\s+\S+)(?:\s+(.*))?',
+                                 parts[3].strip()) if len(parts) == 4 else None
+            if not start:
+                raise ValueError('Incomplete process table row')
+            pid = int(parts[0])
+            if pid in self.rows:
+                raise ValueError('Duplicate process table PID')
+            self.rows[pid] = (int(parts[1]), parts[2], start[1])
+            self.args[pid] = start[2] or ''
+        self.queries = {query}
 
     def members(self, pgid):
         return [pid for pid, (group, stat, _) in self.rows.items()

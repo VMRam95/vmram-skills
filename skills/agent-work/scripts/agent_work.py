@@ -305,19 +305,22 @@ class Flow:
         resume_ready = (job['state'] == 'queued' and job['adapter'].get('prepared')
                         and job.get('allocation_realized') and not job.get('reservation_pending')
                         and health.get('state') == 'passed' and health.get('exit_code') == 0)
-        if job['state'] in ('ready', 'validated', 'validation_failed') or resume_ready:
+        resume_reload = (job['state'] == 'queued' and job['adapter'].get('prepared')
+                         and job['adapter'].get('source_restart_pending')
+                         and job['adapter'].get('served_source_manifest') is not None)
+        if job['state'] in ('ready', 'validated', 'validation_failed') or resume_ready or resume_reload:
             current = self.pin_repository_bases()
             job = self.job()
             served = job['adapter'].get('served_source_manifest')
-            reloads = served is not None and served != current
+            reloads = bool(job['adapter'].get('source_restart_pending')) or (served is not None and served != current)
+            if reloads:
+                self.save(gate=None, delivery=None)
             if reloads and not self.admit('up', max(0,deadline-time.monotonic())):
                 return 75
             rc = self.hook('health')
             if not rc:
                 self.save(state='ready' if reloads or resume_ready else job['state'],
                           reservation_pending=False, allocation_realized=time.time())
-                if reloads:
-                    self.save(gate=None, delivery=None)
             elif reloads:
                 # A refused or failed reload must not destroy a lane that was
                 # serving: the project keeps its resources and data, the owner fixes
@@ -505,7 +508,7 @@ def main():
                     current_source=flow.pin_repository_bases()
                     job=state.read(job['id'])
                     served=job['adapter'].get('served_source_manifest')
-                    if served is not None and served!=current_source:
+                    if job['adapter'].get('source_restart_pending') or (served is not None and served!=current_source):
                         # Unit tests or git on WIP are fine; anything using the stack is not.
                         print(f"[{job['task']}] warning: source changed since the stack was loaded; "
                               f"run `agent-work start --job {job['id']}` to reload and reseal before "

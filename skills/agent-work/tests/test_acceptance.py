@@ -775,6 +775,48 @@ class FixtureLifecycleTests(unittest.TestCase):
             finally:
                 self.cleanup_and_preserve(state, "source-reload-failure", (job, "reload-failure-owner"))
 
+    def test_pending_restart_readmits_and_invalidates_gate_with_unchanged_source(self):
+        with run_workspace('pending-restart') as parent:
+            try:
+                state, flow, job = self.new_flow(parent, 'pending-restart', 'pending-restart-owner')
+                with mock.patch.object(agent_work, 'capacity', side_effect=deterministic_capacity):
+                    self.assertEqual(0, flow.start())
+                current = state.read(job['id'])
+                state.update_adapter(job['id'], source_restart_pending=True,
+                    served_source_manifest=agent_work.git_manifest(current['adapter']['repositories']))
+                state.save(dict(state.read(job['id']), state='validated',
+                                gate={'passed': True}, delivery={'passed': True}))
+                with mock.patch.object(agent_work.Flow, 'hook', return_value=1) as health:
+                    self.assertEqual(1, self.call_main('start', '--job', job['id'], '--state-dir', str(state.root)))
+                    health.assert_called_once_with('health')
+                kept = state.read(job['id'])
+                self.assertEqual('validated', kept['state'])
+                self.assertIsNone(kept['gate']); self.assertIsNone(kept['delivery'])
+                self.assertTrue(kept['adapter']['source_restart_pending'])
+                self.assertNotIn('close', [p['phase'] for p in kept['phases']])
+                denied = deterministic_capacity(); denied['system']['cpu_idle_percent'] = 0
+                with mock.patch.object(agent_work.Flow, 'hook') as health:
+                    self.assertEqual(75, self.call_main('start', '--job', job['id'], '--state-dir', str(state.root),
+                                                       capacity_sample=lambda: denied))
+                    health.assert_not_called()
+                self.assertEqual('queued', state.read(job['id'])['state'])
+                original = agent_work.Flow.hook
+                def verified(self, phase, *args, **kwargs):
+                    rc = original(self, phase, *args, **kwargs)
+                    if phase == 'health' and rc == 0:
+                        state.update_adapter(job['id'], source_restart_pending=False)
+                    return rc
+                with mock.patch.object(agent_work.Flow, 'hook', verified):
+                    self.assertEqual(0, self.call_main('start', '--job', job['id'], '--state-dir', str(state.root)))
+                ready = state.read(job['id'])
+                self.assertEqual('ready', ready['state'])
+                self.assertIsNone(ready['gate']); self.assertIsNone(ready['delivery'])
+                self.assertFalse(ready['adapter']['source_restart_pending'])
+                self.assertEqual(['queue-up', 'health'], [p['phase'] for p in ready['phases'][-2:]])
+                self.assertEqual(0, flow.close())
+            finally:
+                self.cleanup_and_preserve(state, 'pending-restart', (job, 'pending-restart-owner'))
+
     def test_cli_exec_keeps_reservation_when_phase_cleanup_is_denied(self):
         with run_workspace("cli-exec-cleanup-denied") as parent:
             state, _, job = self.new_flow(parent, "cli-exec-cleanup-denied", "cli-exec-denied-owner")
