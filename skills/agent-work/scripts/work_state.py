@@ -215,7 +215,7 @@ class State:
             raise RuntimeError('Invalid task ID')
         root = str(Path(root).resolve())
         with self.locked():
-            matches = [j for j in self.all() if j['task'] == task and j['root'] == root
+            matches = [j for j in self.active() if j['task'] == task and j['root'] == root
                        and j['state'] not in TERMINAL_STATES]
             if matches:
                 job = self.read(matches[0]['id'])
